@@ -1,35 +1,23 @@
+// Clarity — Recovery Tracker
+// React + Tailwind CSS conversion of the original HTML
+// All Firebase config reads from Vite env vars (VITE_*)
+// Delete index.css to avoid conflicts
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import {
-  getAuth,
-  onAuthStateChanged,
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  sendPasswordResetEmail,
-  updateProfile,
-  GoogleAuthProvider,
-  signInWithPopup,
+  getAuth, onAuthStateChanged, createUserWithEmailAndPassword,
+  signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup,
+  sendPasswordResetEmail, signOut, updateProfile,
 } from "firebase/auth";
 import {
-  getFirestore,
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  addDoc,
-  collection,
-  query,
-  where,
-  orderBy,
-  getDocs,
-  serverTimestamp,
-  Timestamp,
-  increment,
+  getFirestore, doc, getDoc, setDoc, updateDoc, addDoc,
+  collection, query, where, orderBy, getDocs,
+  serverTimestamp, Timestamp, increment,
 } from "firebase/firestore";
 
-// ─── Firebase config from Vite env vars ───────────────────────
-const FIREBASE_CONFIG = {
+// ── FIREBASE INIT (reads from Vite env) ──────────────────────────────────────
+const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
@@ -39,43 +27,45 @@ const FIREBASE_CONFIG = {
 };
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
 
-const firebaseApp = initializeApp(FIREBASE_CONFIG);
-const auth = getAuth(firebaseApp);
-const db   = getFirestore(firebaseApp);
+const fbApp = initializeApp(firebaseConfig);
+const auth  = getAuth(fbApp);
+const db    = getFirestore(fbApp);
+const gp    = new GoogleAuthProvider();
 
-// ─── Constants ─────────────────────────────────────────────────
+// ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const STREAK_MAP = { today: 0, "1d": 1, "3d": 3, "1w": 7, "1m": 30 };
 const MILESTONES = [1, 3, 7, 14, 21, 30, 60, 90, 180, 365];
 const QUOTES = [
-  "Every urge you resist rewires your brain toward freedom. You are changing at the cellular level.",
-  "The urge will pass. It always does. Hold on for just 10 more minutes.",
-  "You are not your addiction. You are the person who wakes up every morning and chooses to fight it.",
-  "Recovery is not a straight line. Every day you try is a day that counts.",
-  "Your brain is plastic. Every choice you make today is reshaping who you are tomorrow.",
+  '"Every urge you resist rewires your brain toward freedom. You are changing at the cellular level."',
+  '"The urge will pass. It always does. Hold on for just 10 more minutes."',
+  '"You are not your addiction. You are the person who wakes up every morning and chooses to fight it."',
+  '"Recovery is not a straight line. Every day you try is a day that counts."',
+  '"Your brain is plastic. Every choice you make today is reshaping who you are tomorrow."',
 ];
 const ALL_TASKS = [
-  { id: "breathing",   name: "Box Breathing",             dur: 300,  icon: "🫁", desc: "Inhale 4s · hold 4s · exhale 4s · repeat",     bg: "rgba(36,134,219,.1)",   levels: ["low","mid","high"] },
-  { id: "grounding",   name: "5-4-3-2-1 Grounding",       dur: 180,  icon: "🧘", desc: "Name 5 things you see, 4 you touch...",          bg: "rgba(78,205,196,.1)",   levels: ["low","mid"] },
-  { id: "music",       name: "Listen to Calming Music",    dur: 600,  icon: "🎵", desc: "Focus only on the sound — nothing else",         bg: "rgba(247,200,115,.15)", levels: ["low","mid"] },
-  { id: "prayer",      name: "Prayer / Reflection",        dur: 300,  icon: "🙏", desc: "Quiet prayer or a reflective moment",            bg: "rgba(247,200,115,.12)", levels: ["low","mid"] },
-  { id: "tea",         name: "Make & Drink Herbal Tea",    dur: 600,  icon: "🍵", desc: "A slow, warm ritual that resets the mind",       bg: "rgba(168,213,186,.15)", levels: ["low","mid"] },
-  { id: "exercise",    name: "Physical Exercise",          dur: 900,  icon: "🏃", desc: "Pushups, burpees, jumping jacks — go hard",      bg: "rgba(168,213,186,.15)", levels: ["mid","high"] },
-  { id: "walk",        name: "Go for a Walk Outside",      dur: 900,  icon: "🚶", desc: "Change your environment and breathe fresh air",   bg: "rgba(168,213,186,.12)", levels: ["low","mid","high"] },
-  { id: "shower",      name: "Cold Shower",                dur: 300,  icon: "🚿", desc: "Cold water resets your nervous system fast",     bg: "rgba(36,134,219,.1)",   levels: ["mid","high"] },
-  { id: "stretching",  name: "Full-body Stretching",       dur: 600,  icon: "🤸", desc: "Stretch every muscle group, slow and deep",      bg: "rgba(36,134,219,.08)",  levels: ["low","mid"] },
-  { id: "cleaning",    name: "Clean or Organise a Space",  dur: 900,  icon: "🧹", desc: "Physical action with a clear, immediate result", bg: "rgba(247,200,115,.15)", levels: ["mid","high"] },
-  { id: "journal",     name: "Journaling",                 dur: 600,  icon: "📝", desc: "Write what you're feeling without filtering",    bg: "rgba(247,200,115,.15)", levels: ["low","mid","high"] },
-  { id: "gratitude",   name: "Gratitude List",             dur: 300,  icon: "💛", desc: "Write 5 things you're genuinely grateful for",   bg: "rgba(247,200,115,.12)", levels: ["low","mid"] },
-  { id: "call",        name: "Call Someone You Trust",     dur: 600,  icon: "📞", desc: "Connection breaks isolation. Reach out now.",    bg: "rgba(168,213,186,.15)", levels: ["mid","high"] },
-  { id: "affirmations",name: "Read Your Affirmations",     dur: 180,  icon: "✨", desc: "Remind yourself who you are and why you fight",  bg: "rgba(36,134,219,.1)",   levels: ["low","mid"] },
-  { id: "breathwork2", name: "Wim Hof Breathwork",         dur: 480,  icon: "💨", desc: "Powerful breathing technique for mental reset",   bg: "rgba(36,134,219,.1)",   levels: ["mid","high"] },
-  { id: "research",    name: "Read about Recovery",        dur: 600,  icon: "📖", desc: "Science of addiction, dopamine and healing",     bg: "rgba(229,115,115,.08)", levels: ["low","mid"] },
-  { id: "puzzle",      name: "Solve a Puzzle or Sudoku",   dur: 600,  icon: "🧩", desc: "Engage your prefrontal cortex on something hard",bg: "rgba(36,134,219,.07)",  levels: ["low","mid"] },
-  { id: "cook",        name: "Cook or Prepare Food",       dur: 900,  icon: "🍳", desc: "Hands-on task that demands full attention",      bg: "rgba(247,200,115,.15)", levels: ["mid","high"] },
-  { id: "draw",        name: "Sketch or Doodle",           dur: 600,  icon: "✏️", desc: "No skill needed — just put pen to paper",        bg: "rgba(229,115,115,.06)", levels: ["low","mid"] },
-  { id: "memorise",    name: "Memorise Something",         dur: 600,  icon: "🧠", desc: "A quote, poem, or passage — focus the mind",     bg: "rgba(36,134,219,.07)",  levels: ["low","mid"] },
+  { id:"breathing",   name:"Box Breathing",             dur:300, icon:"🫁", desc:"Inhale 4s · hold 4s · exhale 4s · repeat",       bg:"rgba(36,134,219,.1)",   levels:["low","mid","high"] },
+  { id:"grounding",   name:"5-4-3-2-1 Grounding",       dur:180, icon:"🧘", desc:"Name 5 things you see, 4 you touch...",           bg:"rgba(78,205,196,.1)",   levels:["low","mid"] },
+  { id:"music",       name:"Listen to Calming Music",   dur:600, icon:"🎵", desc:"Focus only on the sound — nothing else",           bg:"rgba(247,200,115,.15)", levels:["low","mid"] },
+  { id:"prayer",      name:"Prayer / Reflection",       dur:300, icon:"🙏", desc:"Quiet prayer or a reflective moment",              bg:"rgba(247,200,115,.12)", levels:["low","mid"] },
+  { id:"tea",         name:"Make & Drink Herbal Tea",   dur:600, icon:"🍵", desc:"A slow, warm ritual that resets the mind",         bg:"rgba(168,213,186,.15)", levels:["low","mid"] },
+  { id:"exercise",    name:"Physical Exercise",         dur:900, icon:"🏃", desc:"Pushups, burpees, jumping jacks — go hard",        bg:"rgba(168,213,186,.15)", levels:["mid","high"] },
+  { id:"walk",        name:"Go for a Walk Outside",     dur:900, icon:"🚶", desc:"Change your environment and breathe fresh air",    bg:"rgba(168,213,186,.12)", levels:["low","mid","high"] },
+  { id:"shower",      name:"Cold Shower",               dur:300, icon:"🚿", desc:"Cold water resets your nervous system fast",       bg:"rgba(36,134,219,.1)",   levels:["mid","high"] },
+  { id:"stretching",  name:"Full-body Stretching",      dur:600, icon:"🤸", desc:"Stretch every muscle group, slow and deep",        bg:"rgba(36,134,219,.08)",  levels:["low","mid"] },
+  { id:"cleaning",    name:"Clean or Organise a Space", dur:900, icon:"🧹", desc:"Physical action with a clear, immediate result",   bg:"rgba(247,200,115,.15)", levels:["mid","high"] },
+  { id:"journal",     name:"Journaling",                dur:600, icon:"📝", desc:"Write what you're feeling without filtering",      bg:"rgba(247,200,115,.15)", levels:["low","mid","high"] },
+  { id:"gratitude",   name:"Gratitude List",            dur:300, icon:"💛", desc:"Write 5 things you're genuinely grateful for",    bg:"rgba(247,200,115,.12)", levels:["low","mid"] },
+  { id:"call",        name:"Call Someone You Trust",    dur:600, icon:"📞", desc:"Connection breaks isolation. Reach out now.",      bg:"rgba(168,213,186,.15)", levels:["mid","high"] },
+  { id:"affirmations",name:"Read Your Affirmations",    dur:180, icon:"✨", desc:"Remind yourself who you are and why you fight",    bg:"rgba(36,134,219,.1)",   levels:["low","mid"] },
+  { id:"breathwork2", name:"Wim Hof Breathwork",        dur:480, icon:"💨", desc:"Powerful breathing technique for mental reset",    bg:"rgba(36,134,219,.1)",   levels:["mid","high"] },
+  { id:"research",    name:"Read about Recovery",       dur:600, icon:"📖", desc:"Science of addiction, dopamine and healing",       bg:"rgba(229,115,115,.08)", levels:["low","mid"] },
+  { id:"puzzle",      name:"Solve a Puzzle or Sudoku",  dur:600, icon:"🧩", desc:"Engage your prefrontal cortex on something hard",  bg:"rgba(36,134,219,.07)",  levels:["low","mid"] },
+  { id:"cook",        name:"Cook or Prepare Food",      dur:900, icon:"🍳", desc:"Hands-on task that demands full attention",        bg:"rgba(247,200,115,.15)", levels:["mid","high"] },
+  { id:"draw",        name:"Sketch or Doodle",          dur:600, icon:"✏️", desc:"No skill needed — just put pen to paper",         bg:"rgba(229,115,115,.06)", levels:["low","mid"] },
+  { id:"memorise",    name:"Memorise Something",        dur:600, icon:"🧠", desc:"A quote, poem, or passage — focus the mind",       bg:"rgba(36,134,219,.07)",  levels:["low","mid"] },
 ];
-const BREATHE = ["Breathe in slowly...", "Hold...", "Breathe out slowly...", "Hold..."];
+const IL = ["","Very mild","Mild","Mild","Moderate","Moderate","Strong","Strong","Very strong","Extreme","Overwhelming"];
+const BREATHE = ["Breathe in slowly...","Hold...","Breathe out slowly...","Hold..."];
 const ENCOUR  = [
   "You are stronger than this urge. Keep going.",
   "Every second you hold on, the urge weakens.",
@@ -83,106 +73,182 @@ const ENCOUR  = [
   "You're choosing differently right now. That's everything.",
   "The craving peaks and then fades. You're already past the worst.",
 ];
-const IL = ["","Very mild","Mild","Mild","Moderate","Moderate","Strong","Strong","Very strong","Extreme","Overwhelming"];
 const DN = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+const DAYS_OF_WEEK = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 
 function iLevel(v) { return v <= 3 ? "low" : v <= 7 ? "mid" : "high"; }
-function nextMilestone(d) { return MILESTONES.find(m => m > d) || MILESTONES[MILESTONES.length - 1]; }
-function fmt(s) { return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); }
+function fmt(s) { return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0"); }
+function nextMilestone(d) { return MILESTONES.find(m => m > d) || MILESTONES[MILESTONES.length-1]; }
 
-// ─── Gemini helper ─────────────────────────────────────────────
+// ── FIREBASE HELPERS ──────────────────────────────────────────────────────────
+function fbErr(code) {
+  const map = {
+    "auth/email-already-in-use": "This email is already registered. Try logging in.",
+    "auth/invalid-email":        "Please enter a valid email address.",
+    "auth/weak-password":        "Password must be at least 6 characters.",
+    "auth/user-not-found":       "No account found with this email.",
+    "auth/wrong-password":       "Incorrect password. Please try again.",
+    "auth/too-many-requests":    "Too many attempts. Please try again later.",
+    "auth/popup-closed-by-user": "Sign-in was cancelled.",
+    "auth/network-request-failed":"Network error. Check your connection.",
+  };
+  return map[code] || "Something went wrong. Please try again.";
+}
+
+async function saveUser(uid, fields) {
+  if (!uid) return;
+  try { await updateDoc(doc(db, "users", uid), fields); } catch(e) { console.error("saveUser:", e); }
+}
+
 async function gemini(prompt) {
   if (!GEMINI_API_KEY) return null;
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-      { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) }
-    );
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    });
     const data = await res.json();
     return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
-  } catch { return null; }
+  } catch(e) { return null; }
 }
 
-// ─── CSS Variables injected once ───────────────────────────────
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Commissioner:wght@300;400;500;600;700;800;900&display=swap');
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html{font-size:16px;-webkit-font-smoothing:antialiased}
-body{font-family:'Commissioner',sans-serif;min-height:100vh;transition:background .25s,color .25s}
-::-webkit-scrollbar{width:4px}
-::-webkit-scrollbar-thumb{background:rgba(36,134,219,.28);border-radius:2px}
+// ── CSS (global styles in <style> tag via useEffect) ─────────────────────────
+const GLOBAL_CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Commissioner:wght@300;400;500;600;700;800;900&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+  body { font-family: 'Commissioner', sans-serif; min-height: 100vh; }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-thumb { border-radius: 2px; }
+  .dark ::-webkit-scrollbar-thumb { background: rgba(36,134,219,.24); }
+  .light ::-webkit-scrollbar-thumb { background: rgba(36,134,219,.22); }
 
-:root{
-  --blue:#2486DB;--blue-d:#1E6DB8;--blue-bg:rgba(36,134,219,.10);--blue-bd:rgba(36,134,219,.28);--blue-glow:rgba(36,134,219,.20);
-  --navy:#262E36;--green:#A8D5BA;--green-d:#7ABFA0;--green-bg:rgba(168,213,186,.15);--green-bd:rgba(168,213,186,.4);
-  --amber:#F7C873;--amber-bg:rgba(247,200,115,.18);--amber-bd:rgba(247,200,115,.4);
-  --rose:#E57373;--rose-bg:rgba(229,115,115,.12);--rose-bd:rgba(229,115,115,.28);
-  --teal:#4ECDC4;--teal-bg:rgba(78,205,196,.12);--gray-mid:#959CA3;
-}
-[data-theme="light"]{--bg:#F5F7FA;--bg2:#FFFFFF;--bg3:#EEF2F7;--bg4:#E0E7F0;--card:#FFFFFF;--brd:rgba(36,134,219,.12);--brd2:rgba(36,134,219,.22);--t1:#262E36;--t2:#5A6A7A;--t3:#959CA3;--sh:0 1px 4px rgba(36,134,219,.08),0 2px 8px rgba(0,0,0,.05);--sh-md:0 4px 16px rgba(36,134,219,.12),0 2px 6px rgba(0,0,0,.05);--sh-lg:0 8px 32px rgba(36,134,219,.16),0 4px 12px rgba(0,0,0,.06)}
-[data-theme="dark"]{--bg:#181E27;--bg2:#232D3A;--bg3:#2D3A4A;--bg4:#3A4A5C;--card:#232D3A;--brd:rgba(36,134,219,.13);--brd2:rgba(36,134,219,.24);--t1:#EDF2F7;--t2:#9AACBC;--t3:#64788C;--sh:0 2px 8px rgba(0,0,0,.35);--sh-md:0 4px 20px rgba(0,0,0,.45);--sh-lg:0 8px 32px rgba(0,0,0,.55)}
+  @keyframes fadeUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes puls   { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.65)} }
+  @keyframes loadbar{ 0%{width:0%;margin-left:0} 50%{width:60%;margin-left:20%} 100%{width:0%;margin-left:100%} }
+  @keyframes spin   { to{transform:rotate(360deg)} }
 
-@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-@keyframes puls{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.65)}}
-@keyframes loadbar{0%{width:0%;margin-left:0}50%{width:60%;margin-left:20%}100%{width:0%;margin-left:100%}}
-@keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-@keyframes toastIn{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
+  .fade-up { animation: fadeUp 350ms cubic-bezier(.22,1,.36,1) both; }
+  .pulse   { animation: puls 1.6s ease-in-out infinite; }
+  .pulse-slow { animation: puls 2s ease-in-out infinite; }
+  .loadbar { animation: loadbar 1.4s ease-in-out infinite; }
 
-.screen-enter{animation:fadeUp .35s cubic-bezier(.22,1,.36,1) both}
-.pulse-dot{animation:puls 1.6s ease-in-out infinite}
-.streak-dot{animation:puls 2s ease-in-out infinite}
-.loadbar-anim{animation:loadbar 1.4s ease-in-out infinite}
+  /* Streak ring progress */
+  .streak-ring-fill { transition: stroke-dashoffset 1s cubic-bezier(.22,1,.36,1); }
+  .timer-ring-fill  { transition: stroke-dashoffset 1s linear; }
+
+  /* Toggle switch */
+  .tog-input { position:absolute; opacity:0; width:100%; height:100%; cursor:pointer; margin:0; }
+  .tog-input:checked ~ .tog-track { background: #7ABFA0; }
+  .tog-input:checked ~ .tog-thumb { transform: translateX(20px); }
 `;
 
-// ─── Reusable UI primitives ────────────────────────────────────
+// ── THEME TOKENS ──────────────────────────────────────────────────────────────
+function useThemeClasses(dark) {
+  return {
+    bg:   dark ? "bg-[#181E27]" : "bg-[#F5F7FA]",
+    bg2:  dark ? "bg-[#232D3A]" : "bg-white",
+    bg3:  dark ? "bg-[#2D3A4A]" : "bg-[#EEF2F7]",
+    bg4:  dark ? "bg-[#3A4A5C]" : "bg-[#E0E7F0]",
+    card: dark ? "bg-[#232D3A]" : "bg-white",
+    brd:  dark ? "border-[rgba(36,134,219,.13)]" : "border-[rgba(36,134,219,.12)]",
+    brd2: dark ? "border-[rgba(36,134,219,.24)]" : "border-[rgba(36,134,219,.22)]",
+    t1:   dark ? "text-[#EDF2F7]" : "text-[#262E36]",
+    t2:   dark ? "text-[#9AACBC]" : "text-[#5A6A7A]",
+    t3:   dark ? "text-[#64788C]" : "text-[#959CA3]",
+    sh:   dark ? "shadow-[0_2px_8px_rgba(0,0,0,.35)]" : "shadow-[0_1px_4px_rgba(36,134,219,.08),0_2px_8px_rgba(0,0,0,.05)]",
+    shmd: dark ? "shadow-[0_4px_20px_rgba(0,0,0,.45)]" : "shadow-[0_4px_16px_rgba(36,134,219,.12),0_2px_6px_rgba(0,0,0,.05)]",
+    shlg: dark ? "shadow-[0_8px_32px_rgba(0,0,0,.55)]" : "shadow-[0_8px_32px_rgba(36,134,219,.16),0_4px_12px_rgba(0,0,0,.06)]",
+    blue:      dark ? "#5AADE8" : "#2486DB",
+    blueText:  dark ? "text-[#5AADE8]" : "text-[#2486DB]",
+    greenText: dark ? "text-[#A8D5BA]" : "text-[#7ABFA0]",
+  };
+}
 
-function Card({ children, className = "", style = {} }) {
+// ── REUSABLE ATOMS ────────────────────────────────────────────────────────────
+
+function Toast({ msg }) {
   return (
-    <div className={`rounded-2xl overflow-hidden ${className}`}
-      style={{ background: "var(--card)", border: "1px solid var(--brd)", boxShadow: "var(--sh)", ...style }}>
-      {children}
+    <div className={`fixed top-20 left-1/2 -translate-x-1/2 px-5 py-2.5 rounded-full text-sm font-medium z-50 whitespace-nowrap shadow-xl transition-all duration-250
+      ${msg ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-1.5 pointer-events-none"}
+      bg-[#262E36] text-white`}>
+      {msg}
     </div>
   );
 }
 
-function CardHeader({ title, subtitle, right }) {
+function LoadingOverlay({ msg }) {
   return (
-    <div className="flex items-center justify-between px-6 py-4"
-      style={{ borderBottom: "1px solid var(--brd)" }}>
-      <div>
-        <div className="font-bold" style={{ color: "var(--t1)", fontSize: 16 }}>{title}</div>
-        {subtitle && <div className="text-sm mt-0.5" style={{ color: "var(--t2)" }}>{subtitle}</div>}
+    <div className="fixed inset-0 bg-[#F5F7FA] flex flex-col items-center justify-center z-[999]">
+      <div className="w-13 h-13 rounded-xl bg-gradient-to-br from-[#2486DB] to-[#4ECDC4] flex items-center justify-center text-2xl mb-4 shadow-[0_4px_20px_rgba(36,134,219,.2)]">🌿</div>
+      <div className="text-2xl font-black text-[#2486DB] mb-2">Clarity</div>
+      <div className="text-sm text-[#959CA3]">{msg}</div>
+      <div className="w-30 h-[3px] bg-[#EEF2F7] rounded-full mt-5 overflow-hidden">
+        <div className="h-full bg-[#2486DB] rounded-full loadbar" />
       </div>
-      {right}
     </div>
   );
 }
 
-function Btn({ children, variant = "primary", size = "md", full = false, className = "", style = {}, ...props }) {
-  const sizes = { sm: "h-8 px-3.5 text-sm rounded-lg", md: "h-10 px-5 text-[15px] rounded-xl", lg: "h-12 px-7 text-base rounded-2xl" };
+function Modal({ id, open, onClose, title, body, actions }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 bg-[rgba(38,46,54,.55)] z-[200] flex items-center justify-center p-4 backdrop-blur-[4px]"
+      onClick={onClose}>
+      <div className="bg-white border border-[rgba(36,134,219,.22)] rounded-3xl p-6 w-full max-w-[420px] shadow-[0_8px_32px_rgba(36,134,219,.16),0_4px_12px_rgba(0,0,0,.06)] fade-up"
+        onClick={e => e.stopPropagation()}>
+        <div className="text-xl font-bold text-[#262E36] mb-1.5">{title}</div>
+        <div className="text-[15px] text-[#5A6A7A] leading-relaxed mb-6">{body}</div>
+        <div className="flex gap-2">{actions}</div>
+      </div>
+    </div>
+  );
+}
+
+function Btn({ children, onClick, variant = "soft", size = "md", full, disabled, style: sx, className = "" }) {
+  const base = "inline-flex items-center justify-center gap-2 font-semibold rounded-xl border-none cursor-pointer transition-all duration-150 whitespace-nowrap";
+  const sizes = { lg: "h-12 px-7 text-base rounded-2xl", md: "h-10 px-5 text-[15px]", sm: "h-8 px-3.5 text-[13px] rounded-lg" };
   const variants = {
-    primary: { background: "var(--blue)", color: "#fff", boxShadow: "0 2px 10px var(--blue-glow)" },
-    green:   { background: "var(--green-d)", color: "#fff", boxShadow: "0 2px 10px rgba(122,191,160,.3)" },
-    danger:  { background: "var(--rose)", color: "#fff", boxShadow: "0 4px 18px rgba(229,115,115,.32)" },
-    soft:    { background: "var(--bg3)", color: "var(--t2)", border: "1.5px solid var(--brd)" },
-    ghost:   { background: "transparent", color: "var(--blue)", border: "1.5px solid var(--blue-bd)" },
+    primary: "bg-[#2486DB] text-white shadow-[0_2px_10px_rgba(36,134,219,.2)] hover:-translate-y-px hover:bg-[#1E6DB8] hover:shadow-[0_4px_18px_rgba(36,134,219,.2)] active:translate-y-0",
+    green:   "bg-[#7ABFA0] text-white shadow-[0_2px_10px_rgba(122,191,160,.3)] hover:brightness-105 hover:-translate-y-px active:translate-y-0",
+    danger:  "bg-[#E57373] text-white shadow-[0_4px_18px_rgba(229,115,115,.32)] hover:-translate-y-0.5 hover:shadow-[0_8px_28px_rgba(229,115,115,.44)] active:translate-y-0",
+    soft:    "bg-[#EEF2F7] text-[#5A6A7A] border border-[rgba(36,134,219,.12)] hover:bg-[#E0E7F0] hover:text-[#262E36] hover:border-[rgba(36,134,219,.22)]",
+    ghost:   "bg-transparent text-[#2486DB] border border-[rgba(36,134,219,.28)] hover:bg-[rgba(36,134,219,.1)]",
   };
   return (
-    <button className={`inline-flex items-center justify-center gap-2 font-semibold cursor-pointer transition-all duration-150 ${sizes[size]} ${full ? "w-full" : ""} ${className}`}
-      style={{ border: "none", ...variants[variant], ...style }} {...props}>
+    <button onClick={onClick} disabled={disabled} style={sx}
+      className={`${base} ${sizes[size]} ${variants[variant]} ${full ? "w-full" : ""} ${disabled ? "opacity-60 cursor-not-allowed" : ""} ${className}`}>
       {children}
     </button>
   );
 }
 
+function Input({ label, type = "text", value, onChange, placeholder, error, multiline, autoComplete }) {
+  const base = "w-full bg-white border border-[rgba(36,134,219,.22)] rounded-xl px-4 py-3 text-[15px] text-[#262E36] outline-none transition-all duration-150 leading-relaxed placeholder:text-[#959CA3] focus:border-[#2486DB] focus:shadow-[0_0_0_3px_rgba(36,134,219,.1)]";
+  return (
+    <div className="mb-4">
+      {label && <label className="block text-sm font-semibold text-[#262E36] mb-1.5">{label}</label>}
+      {multiline
+        ? <textarea value={value} onChange={onChange} placeholder={placeholder} rows={3}
+            className={`${base} resize-y min-h-[88px] ${error ? "border-[#E57373]" : ""}`} />
+        : <input type={type} value={value} onChange={onChange} placeholder={placeholder}
+            autoComplete={autoComplete}
+            className={`${base} ${error ? "border-[#E57373]" : ""}`} />}
+      {error && <div className="text-[13px] text-[#E57373] mt-1">{error}</div>}
+    </div>
+  );
+}
+
 function InsightBox({ icon, label, text }) {
   return (
-    <div className="flex gap-4 p-4 rounded-2xl" style={{ background: "var(--blue-bg)", border: "1px solid var(--blue-bd)" }}>
-      <div className="text-2xl flex-shrink-0 mt-0.5">{icon}</div>
+    <div className="flex gap-4 bg-[rgba(36,134,219,.1)] border border-[rgba(36,134,219,.28)] rounded-2xl p-4">
+      <div className="w-9 h-9 shrink-0 rounded-xl bg-gradient-to-br from-[#2486DB] to-[#4ECDC4] flex items-center justify-center text-[.9rem] shadow-[0_2px_8px_rgba(36,134,219,.2)]">
+        {icon}
+      </div>
       <div>
-        <div className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "var(--blue)" }}>{label}</div>
-        <div className="text-sm leading-relaxed" style={{ color: "var(--t2)" }}>{text}</div>
+        <div className="text-[11px] font-bold tracking-[.05em] uppercase text-[#2486DB] mb-1">{label}</div>
+        <div className="text-sm text-[#5A6A7A] leading-relaxed">{text}</div>
       </div>
     </div>
   );
@@ -191,21 +257,19 @@ function InsightBox({ icon, label, text }) {
 function TaskRow({ task, selected, onSelect, topPick }) {
   return (
     <button onClick={onSelect}
-      className="w-full flex items-center gap-4 p-4 rounded-2xl text-left transition-all duration-150 cursor-pointer"
-      style={{
-        background: selected ? "var(--blue-bg)" : "var(--bg)",
-        border: selected ? "1.5px solid var(--blue-bd)" : "1.5px solid var(--brd)",
-        marginBottom: 8,
-      }}>
-      <div className="w-11 h-11 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
-        style={{ background: task.bg }}>{task.icon}</div>
-      <div className="flex-1 min-w-0">
-        <div className="font-semibold text-sm" style={{ color: "var(--t1)" }}>{task.name}</div>
-        <div className="text-xs mt-0.5" style={{ color: "var(--t2)" }}>{Math.floor(task.dur / 60)} min · {task.desc}</div>
+      className={`flex items-center gap-4 p-4 rounded-2xl border-[1.5px] w-full text-left transition-all duration-150 shadow-[0_1px_4px_rgba(36,134,219,.08),0_2px_8px_rgba(0,0,0,.05)]
+        ${selected
+          ? "border-[#2486DB] bg-[rgba(36,134,219,.1)] shadow-[0_4px_16px_rgba(36,134,219,.12)]"
+          : "border-[rgba(36,134,219,.12)] bg-white hover:border-[rgba(36,134,219,.28)] hover:bg-[rgba(36,134,219,.1)] hover:-translate-y-px hover:shadow-[0_4px_16px_rgba(36,134,219,.12)]"}`}>
+      <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0" style={{ background: task.bg }}>
+        {task.icon}
+      </div>
+      <div className="flex-1 min-w-0 text-left">
+        <div className="text-[15px] font-semibold text-[#262E36] mb-0.5">{task.name}</div>
+        <div className="text-[13px] text-[#5A6A7A] leading-snug">{Math.floor(task.dur/60)} min · {task.desc}</div>
       </div>
       {topPick && (
-        <span className="text-xs font-bold px-2.5 py-1 rounded-full flex-shrink-0"
-          style={{ background: "var(--green-bg)", color: "var(--green-d)", border: "1px solid var(--green-bd)" }}>
+        <span className="text-[12px] font-bold px-2.5 py-0.5 rounded-full bg-[rgba(247,200,115,.18)] text-[#6B4E0A] border border-[rgba(247,200,115,.4)] shrink-0">
           ✦ Top pick
         </span>
       )}
@@ -213,1503 +277,1369 @@ function TaskRow({ task, selected, onSelect, topPick }) {
   );
 }
 
+function CalStrip({ logs, days }) {
+  const today = new Date();
+  const dayMap = {};
+  for (let i = 0; i < days; i++) {
+    const d = new Date(today); d.setDate(today.getDate()-i);
+    dayMap[d.toDateString()] = "empty";
+  }
+  dayMap[today.toDateString()] = "now";
+  logs.forEach(l => {
+    const key = l.date.toDateString();
+    if (key in dayMap) {
+      if (l.outcome === "relapsed") dayMap[key] = "bad";
+      else if (dayMap[key] === "empty") dayMap[key] = "ok";
+    }
+  });
+
+  return (
+    <div className="flex gap-1.5 overflow-x-auto pb-1">
+      {Array.from({ length: days }, (_, i) => {
+        const d = new Date(today); d.setDate(today.getDate()-(days-1-i));
+        const cls = dayMap[d.toDateString()] || "empty";
+        const styles = {
+          ok:    "bg-[rgba(168,213,186,.15)] border-[rgba(168,213,186,.4)]",
+          bad:   "bg-[rgba(229,115,115,.12)] border-[rgba(229,115,115,.28)]",
+          now:   "border-[#2486DB] bg-[rgba(36,134,219,.1)] shadow-[0_0_0_2px_rgba(36,134,219,.1)]",
+          empty: "bg-[#EEF2F7] border-[rgba(36,134,219,.12)]",
+        };
+        const dotStyles = {
+          ok:    "bg-[#7ABFA0]", bad: "bg-[#E57373]", now: "bg-[#2486DB]", empty: "bg-transparent",
+        };
+        return (
+          <div key={i} className={`shrink-0 w-11 rounded-xl border-[1.5px] py-2 px-1 text-center ${styles[cls]}`}>
+            <div className="text-[11px] font-bold uppercase text-[#959CA3]">{DN[d.getDay()]}</div>
+            <div className="text-[13px] font-bold text-[#5A6A7A] my-0.5">{d.getDate()}</div>
+            <div className={`w-1.5 h-1.5 rounded-full mx-auto mt-1 ${dotStyles[cls]}`} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Toggle({ checked, onChange }) {
   return (
-    <label className="relative inline-flex items-center cursor-pointer" style={{ width: 44, height: 24 }}>
-      <input type="checkbox" checked={checked} onChange={onChange} className="sr-only" />
-      <div className="w-full h-full rounded-full transition-all duration-200"
-        style={{ background: checked ? "var(--blue)" : "var(--bg4)" }} />
-      <div className="absolute w-5 h-5 bg-white rounded-full shadow transition-all duration-200"
-        style={{ left: checked ? 22 : 2, top: 2 }} />
-    </label>
-  );
-}
-
-// ─── Toast ─────────────────────────────────────────────────────
-function Toast({ msg, visible }) {
-  if (!visible && !msg) return null;
-  return (
-    <div className="fixed bottom-8 left-1/2 z-50 px-5 py-3 rounded-2xl text-sm font-semibold text-white shadow-xl"
-      style={{
-        transform: "translateX(-50%)",
-        background: "var(--navy)",
-        animation: visible ? "toastIn .25s ease both" : "none",
-        opacity: visible ? 1 : 0,
-        transition: "opacity .3s",
-        pointerEvents: "none",
-        maxWidth: "90vw",
-        whiteSpace: "nowrap",
-      }}>
-      {msg}
+    <div className="relative w-11 h-6 shrink-0">
+      <input type="checkbox" checked={checked} onChange={onChange} className="tog-input" />
+      <div className={`absolute inset-0 rounded-full transition-colors duration-150 ${checked ? "bg-[#7ABFA0]" : "bg-[#E0E7F0]"}`} />
+      <div className={`absolute top-[3px] left-[3px] w-[18px] h-[18px] rounded-full bg-white shadow-[0_1px_4px_rgba(0,0,0,.2)] transition-transform duration-150 ${checked ? "translate-x-5" : "translate-x-0"}`} />
     </div>
   );
 }
 
-// ─── Modal ─────────────────────────────────────────────────────
-function Modal({ open, onClose, title, body, actions }) {
-  if (!open) return null;
+function Badge({ children, variant = "green" }) {
+  const styles = {
+    green: "bg-[rgba(168,213,186,.15)] text-[#7ABFA0] border border-[rgba(168,213,186,.4)]",
+    blue:  "bg-[rgba(36,134,219,.1)] text-[#2486DB] border border-[rgba(36,134,219,.28)]",
+    amber: "bg-[rgba(247,200,115,.18)] text-[#6B4E0A] border border-[rgba(247,200,115,.4)]",
+    rose:  "bg-[rgba(229,115,115,.12)] text-[#E57373] border border-[rgba(229,115,115,.28)]",
+  };
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,.5)", backdropFilter: "blur(4px)" }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="w-full max-w-sm rounded-3xl p-6 shadow-2xl screen-enter"
-        style={{ background: "var(--card)", border: "1px solid var(--brd2)" }}>
-        <div className="text-lg font-bold mb-2" style={{ color: "var(--t1)" }}>{title}</div>
-        <div className="text-sm leading-relaxed mb-6" style={{ color: "var(--t2)" }}>{body}</div>
-        <div className="flex gap-3">{actions}</div>
-      </div>
-    </div>
+    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-bold ${styles[variant]}`}>
+      {children}
+    </span>
   );
 }
 
-// ─── Loading Overlay ───────────────────────────────────────────
-function LoadingOverlay({ msg }) {
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center"
-      style={{ background: "var(--bg)" }}>
-      <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl mb-4"
-        style={{ background: "linear-gradient(135deg,var(--blue),var(--teal))", boxShadow: "0 4px 20px var(--blue-glow)" }}>
-        🌿
-      </div>
-      <div className="text-2xl font-black mb-2" style={{ color: "var(--blue)" }}>Clarity</div>
-      <div className="text-sm mb-5" style={{ color: "var(--t3)" }}>{msg}</div>
-      <div className="w-32 h-1 rounded-full overflow-hidden" style={{ background: "var(--bg3)" }}>
-        <div className="h-full rounded-full loadbar-anim" style={{ background: "var(--blue)" }} />
-      </div>
-    </div>
-  );
-}
-
-// ─── Navbar ────────────────────────────────────────────────────
-function Navbar({ screen, streak, onNav, onTheme, theme }) {
-  const showApp = !["auth", "onboarding"].includes(screen);
-  return (
-    <nav className="sticky top-0 z-40 h-16 flex items-center px-6"
-      style={{ background: "var(--bg2)", borderBottom: "1px solid var(--brd)", boxShadow: "var(--sh)" }}>
-      <button onClick={() => onNav("dashboard")}
-        className="flex items-center gap-2.5 flex-shrink-0 transition-opacity hover:opacity-80">
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base"
-          style={{ background: "linear-gradient(135deg,var(--blue),var(--teal))", boxShadow: "0 2px 10px var(--blue-glow)" }}>
-          🌿
-        </div>
-        <span className="text-xl font-black" style={{ color: "var(--blue)", letterSpacing: "-.01em" }}>Clarity</span>
-      </button>
-      <div className="flex-1" />
-      <div className="flex items-center gap-2">
-        {showApp && (
-          <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold"
-            style={{ background: "var(--green-bg)", border: "1px solid var(--green-bd)", color: "var(--green-d)" }}>
-            🔥 {streak} days
-          </div>
-        )}
-        <button onClick={onTheme}
-          className="w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-150 text-base"
-          style={{ color: "var(--t2)", border: "1.5px solid transparent" }}
-          onMouseEnter={e => e.currentTarget.style.background = "var(--bg3)"}
-          onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-          {theme === "dark" ? "🌙" : "☀️"}
-        </button>
-        {showApp && (
-          <>
-            <button onClick={() => onNav("analytics")}
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-base transition-all duration-150"
-              style={{
-                background: screen === "analytics" ? "var(--blue-bg)" : "transparent",
-                border: screen === "analytics" ? "1.5px solid var(--blue-bd)" : "1.5px solid transparent",
-                color: screen === "analytics" ? "var(--blue)" : "var(--t2)"
-              }}>📊</button>
-            <button onClick={() => onNav("profile")}
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-base transition-all duration-150"
-              style={{
-                background: screen === "profile" ? "var(--blue-bg)" : "transparent",
-                border: screen === "profile" ? "1.5px solid var(--blue-bd)" : "1.5px solid transparent",
-                color: screen === "profile" ? "var(--blue)" : "var(--t2)"
-              }}>👤</button>
-          </>
-        )}
-      </div>
-    </nav>
-  );
-}
-
-// ─── Auth Screen ───────────────────────────────────────────────
-function AuthScreen({ onDone }) {
-  const [tab, setTab] = useState("signup");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [pass, setPass] = useState("");
-  const [err, setErr] = useState("");
+// ── AUTH SCREEN ───────────────────────────────────────────────────────────────
+function AuthScreen({ onNav, onToast }) {
+  const [tab, setTab]         = useState("signup");
+  const [suName, setSuName]   = useState("");
+  const [suEmail, setSuEmail] = useState("");
+  const [suPass, setSuPass]   = useState("");
+  const [liEmail, setLiEmail] = useState("");
+  const [liPass, setLiPass]   = useState("");
+  const [err, setErr]         = useState("");
   const [loading, setLoading] = useState(false);
 
-  const fbErr = code => ({
-    "auth/email-already-in-use": "This email is already registered. Try logging in.",
-    "auth/invalid-email": "Please enter a valid email address.",
-    "auth/weak-password": "Password must be at least 6 characters.",
-    "auth/user-not-found": "No account found with this email.",
-    "auth/wrong-password": "Incorrect password. Please try again.",
-    "auth/too-many-requests": "Too many attempts. Please try again later.",
-    "auth/popup-closed-by-user": "Sign-in was cancelled.",
-    "auth/network-request-failed": "Network error. Check your connection.",
-  }[code] || "Something went wrong. Please try again.");
-
   async function doSignUp() {
-    setErr(""); if (!name) { setErr("Please enter your name."); return; }
-    if (!email) { setErr("Please enter your email."); return; }
-    if (!pass || pass.length < 6) { setErr("Password must be at least 6 characters."); return; }
+    setErr("");
+    if (!suName)  { setErr("Please enter your name."); return; }
+    if (!suEmail) { setErr("Please enter your email."); return; }
+    if (!suPass || suPass.length < 6) { setErr("Password must be at least 6 characters."); return; }
     setLoading(true);
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email, pass);
-      await updateProfile(cred.user, { displayName: name });
+      const cred = await createUserWithEmailAndPassword(auth, suEmail, suPass);
+      await updateProfile(cred.user, { displayName: suName });
       await setDoc(doc(db, "users", cred.user.uid), {
-        name, email, streak: 0, bestStreak: 0, urgesTotal: 0,
-        resisted: 0, tasksDone: 0, onboardingComplete: false,
-        createdAt: serverTimestamp(),
+        uid: cred.user.uid, name: suName, email: suEmail,
+        createdAt: serverTimestamp(), onboardingComplete: false,
+        addictions: [], streak: 0, bestStreak: 0,
+        urgesTotal: 0, resisted: 0, tasksDone: 0, theme: "light",
       });
-    } catch (e) { setErr(fbErr(e.code)); setLoading(false); }
+      onToast("Welcome to Clarity, " + suName + "! 🌿");
+    } catch(e) { setErr(fbErr(e.code)); setLoading(false); }
   }
 
   async function doLogin() {
-    setErr(""); if (!email) { setErr("Please enter your email."); return; }
-    if (!pass) { setErr("Please enter your password."); return; }
+    setErr("");
+    if (!liEmail) { setErr("Please enter your email."); return; }
+    if (!liPass)  { setErr("Please enter your password."); return; }
     setLoading(true);
-    try { await signInWithEmailAndPassword(auth, email, pass); }
-    catch (e) { setErr(fbErr(e.code)); setLoading(false); }
+    try { await signInWithEmailAndPassword(auth, liEmail, liPass); }
+    catch(e) { setErr(fbErr(e.code)); setLoading(false); }
   }
 
   async function doGoogle() {
-    setLoading(true);
     try {
-      const provider = new GoogleAuthProvider();
-      const cred = await signInWithPopup(auth, provider);
+      const cred = await signInWithPopup(auth, gp);
       const snap = await getDoc(doc(db, "users", cred.user.uid));
       if (!snap.exists()) {
         await setDoc(doc(db, "users", cred.user.uid), {
-          name: cred.user.displayName || "Champion", email: cred.user.email,
-          streak: 0, bestStreak: 0, urgesTotal: 0, resisted: 0, tasksDone: 0,
-          onboardingComplete: false, createdAt: serverTimestamp(),
+          uid: cred.user.uid, name: cred.user.displayName,
+          email: cred.user.email, createdAt: serverTimestamp(),
+          onboardingComplete: false, addictions: [], streak: 0,
+          bestStreak: 0, urgesTotal: 0, resisted: 0, tasksDone: 0, theme: "light",
         });
       }
-    } catch (e) { setErr(fbErr(e.code)); setLoading(false); }
+    } catch(e) { onToast(fbErr(e.code)); }
   }
 
   async function doReset() {
-    if (!email) { setErr("Enter your email above first, then click Forgot password."); return; }
-    try { await sendPasswordResetEmail(auth, email); setErr("Password reset email sent — check your inbox."); }
-    catch (e) { setErr(fbErr(e.code)); }
+    if (!liEmail) { setErr("Enter your email above first, then click Forgot password."); return; }
+    try { await sendPasswordResetEmail(auth, liEmail); onToast("Password reset email sent!"); }
+    catch(e) { setErr(fbErr(e.code)); }
   }
 
-  const inp = "w-full h-12 px-4 rounded-xl text-sm font-medium outline-none transition-all duration-150 mb-4";
-  const inpStyle = { background: "var(--bg3)", border: "1.5px solid var(--brd)", color: "var(--t1)", fontFamily: "inherit" };
-  const inpFocus = e => { e.target.style.borderColor = "var(--blue)"; e.target.style.boxShadow = "0 0 0 3px var(--blue-bg)"; };
-  const inpBlur  = e => { e.target.style.borderColor = "var(--brd)"; e.target.style.boxShadow = "none"; };
+  const GoogleSVG = () => (
+    <svg width="18" height="18" viewBox="0 0 48 48">
+      <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.8 2.5 30.3 0 24 0 14.7 0 6.7 5.4 2.9 13.2l7.8 6.1C12.5 13 17.8 9.5 24 9.5z"/>
+      <path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.4c-.5 2.8-2.1 5.1-4.5 6.7l7 5.4c4.1-3.8 6.4-9.4 6.4-16.1z"/>
+      <path fill="#FBBC05" d="M10.7 28.7c-.6-1.6-.9-3.3-.9-5.2s.3-3.6.9-5.2l-7.8-6.1C1.1 15.4 0 19.6 0 24s1.1 8.6 2.9 11.8l7.8-6.1z"/>
+      <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7-5.4c-2 1.3-4.5 2.1-8 2.1-6.2 0-11.5-4.2-13.4-9.8l-7.8 6.1C6.7 42.6 14.7 48 24 48z"/>
+    </svg>
+  );
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "var(--bg)" }}>
-      <div className="w-full max-w-[420px] screen-enter">
+    <div className="min-h-screen flex items-center justify-center p-6 bg-[#F5F7FA]">
+      <div className="w-full max-w-[420px]">
         <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4"
-            style={{ background: "linear-gradient(135deg,var(--blue),var(--teal))", boxShadow: "0 4px 20px var(--blue-glow)" }}>
-            🌿
-          </div>
-          <div className="text-3xl font-black tracking-tight" style={{ color: "var(--blue)" }}>Clarity</div>
-          <div className="text-sm mt-1" style={{ color: "var(--t2)" }}>Your private recovery companion</div>
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#2486DB] to-[#4ECDC4] flex items-center justify-center text-[1.8rem] mx-auto mb-4 shadow-[0_4px_20px_rgba(36,134,219,.2)]">🌿</div>
+          <div className="text-[28px] font-black text-[#2486DB] tracking-tight">Clarity</div>
+          <div className="text-[15px] text-[#5A6A7A] mt-1">Your private recovery companion</div>
         </div>
 
         {/* Tab switcher */}
-        <div className="flex p-1 rounded-full mb-6" style={{ background: "var(--bg3)" }}>
+        <div className="flex bg-[#EEF2F7] rounded-full p-1 mb-6">
           {["signup","login"].map(t => (
             <button key={t} onClick={() => { setTab(t); setErr(""); }}
-              className="flex-1 h-10 rounded-full text-sm font-bold transition-all duration-150"
-              style={{
-                background: tab === t ? "var(--card)" : "transparent",
-                color: tab === t ? "var(--t1)" : "var(--t2)",
-                boxShadow: tab === t ? "var(--sh)" : "none",
-                border: "none",
-                fontFamily: "inherit",
-                cursor: "pointer",
-              }}>
+              className={`flex-1 h-[38px] rounded-full text-sm font-bold transition-all duration-150
+                ${tab===t ? "bg-white text-[#262E36] shadow-[0_1px_4px_rgba(36,134,219,.08)]" : "bg-transparent text-[#5A6A7A]"}`}>
               {t === "signup" ? "Create account" : "Log in"}
             </button>
           ))}
         </div>
 
-        {err && <div className="text-sm mb-4 px-4 py-3 rounded-xl" style={{ color: "var(--rose)", background: "var(--rose-bg)", border: "1px solid var(--rose-bd)" }}>{err}</div>}
+        <div className="bg-white rounded-3xl border border-[rgba(36,134,219,.12)] p-6 shadow-[0_4px_16px_rgba(36,134,219,.12)]">
+          {err && <div className="text-[13px] text-[#E57373] mb-4 bg-[rgba(229,115,115,.08)] border border-[rgba(229,115,115,.28)] rounded-xl px-3 py-2">{err}</div>}
 
-        {tab === "signup" ? (
-          <>
-            <input className={inp} style={inpStyle} placeholder="Your name" value={name} onChange={e => setName(e.target.value)} onFocus={inpFocus} onBlur={inpBlur} />
-            <input className={inp} style={inpStyle} placeholder="you@example.com" type="email" value={email} onChange={e => setEmail(e.target.value)} onFocus={inpFocus} onBlur={inpBlur} />
-            <input className={inp} style={inpStyle} placeholder="At least 6 characters" type="password" value={pass} onChange={e => setPass(e.target.value)} onFocus={inpFocus} onBlur={inpBlur} />
-            <Btn variant="primary" size="lg" full onClick={doSignUp} disabled={loading} className="mb-4">
-              {loading ? "Please wait..." : "Create my account →"}
-            </Btn>
-          </>
-        ) : (
-          <>
-            <input className={inp} style={inpStyle} placeholder="you@example.com" type="email" value={email} onChange={e => setEmail(e.target.value)} onFocus={inpFocus} onBlur={inpBlur} />
-            <input className={inp} style={inpStyle} placeholder="Your password" type="password" value={pass} onChange={e => setPass(e.target.value)} onFocus={inpFocus} onBlur={inpBlur} />
-            <Btn variant="primary" size="lg" full onClick={doLogin} disabled={loading} className="mb-2">
-              {loading ? "Please wait..." : "Log in →"}
-            </Btn>
-            <button onClick={doReset} className="block w-full text-center text-sm mb-4" style={{ color: "var(--blue)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>
-              Forgot password?
-            </button>
-          </>
-        )}
+          {tab === "signup" ? (
+            <>
+              <Input label="Your name" value={suName} onChange={e=>setSuName(e.target.value)} placeholder="How should we call you?" autoComplete="name"/>
+              <Input label="Email address" type="email" value={suEmail} onChange={e=>setSuEmail(e.target.value)} placeholder="you@example.com" autoComplete="email"/>
+              <Input label="Password" type="password" value={suPass} onChange={e=>setSuPass(e.target.value)} placeholder="At least 6 characters" autoComplete="new-password"/>
+              <Btn variant="primary" size="lg" full onClick={doSignUp} disabled={loading}>
+                {loading ? "Please wait..." : "Create my account →"}
+              </Btn>
+            </>
+          ) : (
+            <>
+              <Input label="Email address" type="email" value={liEmail} onChange={e=>setLiEmail(e.target.value)} placeholder="you@example.com" autoComplete="email"/>
+              <Input label="Password" type="password" value={liPass} onChange={e=>setLiPass(e.target.value)} placeholder="Your password" autoComplete="current-password"/>
+              <Btn variant="primary" size="lg" full onClick={doLogin} disabled={loading}>
+                {loading ? "Please wait..." : "Log in →"}
+              </Btn>
+              <button onClick={doReset} className="block w-full text-center text-[13px] text-[#2486DB] mt-4 bg-none border-none cursor-pointer">
+                Forgot password?
+              </button>
+            </>
+          )}
 
-        <div className="flex items-center gap-2 my-4">
-          <div className="flex-1 h-px" style={{ background: "var(--brd)" }} />
-          <span className="text-xs" style={{ color: "var(--t3)" }}>or</span>
-          <div className="flex-1 h-px" style={{ background: "var(--brd)" }} />
+          <div className="flex items-center gap-2.5 my-4">
+            <div className="flex-1 h-px bg-[rgba(36,134,219,.12)]"/>
+            <span className="text-[12px] text-[#959CA3]">or</span>
+            <div className="flex-1 h-px bg-[rgba(36,134,219,.12)]"/>
+          </div>
+          <Btn variant="soft" size="lg" full onClick={doGoogle}><GoogleSVG/> Continue with Google</Btn>
+          <p className="text-[12px] text-[#959CA3] text-center mt-4 leading-relaxed">Your data is private and never shared.</p>
         </div>
-
-        <Btn variant="soft" size="lg" full onClick={doGoogle}>
-          <svg width="18" height="18" viewBox="0 0 48 48">
-            <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.8 2.5 30.3 0 24 0 14.7 0 6.7 5.4 2.9 13.2l7.8 6.1C12.5 13 17.8 9.5 24 9.5z"/>
-            <path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.4c-.5 2.8-2.1 5.1-4.5 6.7l7 5.4c4.1-3.8 6.4-9.4 6.4-16.1z"/>
-            <path fill="#FBBC05" d="M10.7 28.7c-.6-1.6-.9-3.3-.9-5.2s.3-3.6.9-5.2l-7.8-6.1C1.1 15.4 0 19.6 0 24s1.1 8.6 2.9 11.8l7.8-6.1z"/>
-            <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7-5.4c-2 1.3-4.5 2.1-8 2.1-6.2 0-11.5-4.2-13.4-9.8l-7.8 6.1C6.7 42.6 14.7 48 24 48z"/>
-          </svg>
-          Continue with Google
-        </Btn>
-        <p className="text-xs text-center mt-4" style={{ color: "var(--t3)" }}>Your data is private and never shared.</p>
       </div>
     </div>
   );
 }
 
-// ─── Onboarding Screen ────────────────────────────────────────
-function OnboardingScreen({ user, onDone, toast }) {
-  const [step, setStep] = useState(1);
+// ── ONBOARDING SCREEN ─────────────────────────────────────────────────────────
+function OnboardingScreen({ S, onDone, onToast }) {
+  const [step, setStep]   = useState(1);
   const [addictions, setAddictions] = useState([]);
-  const [period, setPeriod] = useState(null);
-  const [timing, setTiming] = useState([]);
-  const [triggers, setTriggers] = useState([]);
-  const [relapse, setRelapse] = useState(null);
+  const [period, setPeriod]         = useState(null);
+  const [timing, setTiming]         = useState([]);
+  const [triggers, setTriggers]     = useState([]);
+  const [relapse, setRelapse]       = useState(null);
 
-  const ADDICTION_OPTS = [
-    { v: "porn",    icon: "🔞", name: "Pornography",          meta: "Screen-based adult content addiction",        bg: "var(--rose-bg)" },
-    { v: "smoking", icon: "🚬", name: "Smoking / Nicotine",   meta: "Cigarettes, vapes, nicotine pouches",         bg: "var(--amber-bg)" },
-    { v: "alcohol", icon: "🍺", name: "Alcohol",              meta: "Beer, wine, spirits",                         bg: "var(--blue-bg)" },
-    { v: "screen",  icon: "📱", name: "Screen / Social media",meta: "Doom-scrolling, gaming, compulsive browsing", bg: "var(--green-bg)" },
-  ];
-  const PERIOD_OPTS = [
-    { v: "lt1y",  icon: "📅", name: "Less than a year" },
-    { v: "1to3y", icon: "🗓️", name: "1 – 3 years" },
-    { v: "3to5y", icon: "⏳", name: "3 – 5 years" },
-    { v: "5yp",   icon: "🔁", name: "More than 5 years" },
-  ];
-  const TIMING_CHIPS = ["🌅 Morning","☀️ Afternoon","🌆 Evening","🌙 Late night","😤 Under stress","😴 When bored","🚶 When alone","🍻 Socially"];
-  const TRIGGER_CHIPS = ["😰 Stress","😑 Boredom","😔 Loneliness","😟 Anxiety","😡 Anger","😢 Sadness","🎉 Celebrations","😴 Sleeplessness","💔 Rejection","🔄 Pure habit"];
-  const RELAPSE_OPTS = [
-    { v: "today", icon: "📍", name: "Today — starting fresh right now", meta: "Streak begins at 0 days", bg: "var(--rose-bg)" },
-    { v: "1d",    icon: "📆", name: "Yesterday",                        meta: "Streak begins at 1 day",  bg: "var(--bg3)" },
-    { v: "3d",    icon: "🌤️", name: "About 3 days ago",                meta: "Streak begins at 3 days", bg: "var(--bg3)" },
-    { v: "1w",    icon: "💪", name: "About a week ago",                 meta: "Streak begins at 7 days", bg: "var(--green-bg)" },
-    { v: "1m",    icon: "🏆", name: "Over a month ago",                 meta: "Streak begins at 30 days",bg: "var(--green-bg)" },
-  ];
+  function toggleArr(arr, setArr, v) {
+    setArr(a => a.includes(v) ? a.filter(x=>x!==v) : [...a, v]);
+  }
 
   async function finish() {
-    const relapseDate = new Date();
-    relapseDate.setDate(relapseDate.getDate() - (STREAK_MAP[relapse] || 0));
+    if (!relapse) { onToast("Please choose one option"); return; }
     const streak = STREAK_MAP[relapse] || 0;
-    try {
-      await updateDoc(doc(db, "users", user.uid), {
-        onboardingComplete: true, addictions, period,
-        timing, triggers, relapse,
+    const relapseDate = new Date(); relapseDate.setDate(relapseDate.getDate()-streak);
+    if (S.uid) {
+      await saveUser(S.uid, {
+        onboardingComplete: true, addictions, period: period||"", timing,
+        triggers, relapse, streak,
         lastRelapseDate: Timestamp.fromDate(relapseDate),
-        streak, bestStreak: streak,
+        bestStreak: Math.max(streak, 0),
       });
-      onDone({ addictions, streak, best: streak, lastRelapseDate: relapseDate });
-    } catch (e) { console.error(e); }
+    }
+    onDone({ addictions, streak, best: Math.max(streak,0), lastRelapseDate: relapseDate });
+    onToast("Welcome to Clarity, " + S.userName + "! 🌿");
   }
 
-  function obNext() {
-    if (step === 1 && !addictions.length) { toast("Please select at least one option"); return; }
-    if (step === 2 && !period) { toast("Please choose one option"); return; }
-    if (step === 5) { if (!relapse) { toast("Please choose one option"); return; } finish(); return; }
-    setStep(s => s + 1);
+  function next() {
+    if (step===1 && !addictions.length) { onToast("Please select at least one option"); return; }
+    if (step===2 && !period)            { onToast("Please choose one option"); return; }
+    if (step===5) { finish(); return; }
+    setStep(s=>s+1);
   }
 
-  const stepsLabels = ["Addiction", "History", "Timing", "Triggers", "Starting point"];
+  const Eyebrow = ({ n, label }) => (
+    <div className="inline-flex items-center gap-1.5 text-[12px] font-bold tracking-[.06em] uppercase text-[#7ABFA0] mb-2.5">
+      <span className="w-1.5 h-1.5 rounded-full bg-[#7ABFA0]"/>Step {n} of 5 · {label}
+    </div>
+  );
 
-  const rowSel = (list, val) => list.includes(val);
-  const toggleList = (list, setList, val) =>
-    setList(list.includes(val) ? list.filter(x => x !== val) : [...list, val]);
+  const SelTaskRow = ({ icon, bg, name, meta, value, checked, onClick }) => (
+    <button onClick={onClick}
+      className={`flex items-center gap-4 p-4 rounded-2xl border-[1.5px] w-full text-left transition-all duration-150
+        ${checked
+          ? "border-[#2486DB] bg-[rgba(36,134,219,.1)] shadow-[0_4px_16px_rgba(36,134,219,.12)]"
+          : "border-[rgba(36,134,219,.12)] bg-white hover:border-[rgba(36,134,219,.28)] hover:bg-[rgba(36,134,219,.1)]"}
+        shadow-[0_1px_4px_rgba(36,134,219,.08)]`}>
+      <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0" style={{background:bg}}>{icon}</div>
+      <div className="flex-1 text-left">
+        <div className="text-[15px] font-semibold text-[#262E36] mb-0.5">{name}</div>
+        {meta && <div className="text-[13px] text-[#5A6A7A]">{meta}</div>}
+      </div>
+    </button>
+  );
+
+  const Chip = ({ label, value, checked, onClick }) => (
+    <button onClick={onClick}
+      className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full border-[1.5px] text-sm font-medium transition-all duration-150
+        ${checked
+          ? "bg-[rgba(36,134,219,.1)] border-[#2486DB] text-[#2486DB] font-semibold"
+          : "border-[rgba(36,134,219,.22)] bg-[#EEF2F7] text-[#5A6A7A] hover:border-[rgba(36,134,219,.28)] hover:text-[#2486DB] hover:bg-[rgba(36,134,219,.1)]"}`}>
+      {label}
+    </button>
+  );
 
   return (
-    <div className="min-h-screen" style={{ background: "var(--bg)" }}>
-      <div className="max-w-xl mx-auto px-6 py-10">
-        {/* Progress */}
-        <div className="flex gap-2 mb-8">
+    <div className="min-h-screen bg-[#F5F7FA] py-8">
+      <div className="max-w-[560px] mx-auto px-6">
+
+        {/* Progress bar */}
+        <div className="flex gap-1.5 mb-10">
           {[1,2,3,4,5].map(i => (
-            <div key={i} className="flex-1 h-1.5 rounded-full transition-all duration-300"
-              style={{ background: i <= step ? "var(--blue)" : "var(--bg4)" }} />
+            <div key={i} className={`flex-1 h-1 rounded-full transition-colors duration-250 ${i<=step ? "bg-[#7ABFA0]" : "bg-[#E0E7F0]"}`}/>
           ))}
         </div>
 
-        <div className="screen-enter" key={step}>
-          <div className="flex items-center gap-2 mb-3">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--blue)" }} />
-            <span className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--t3)" }}>
-              Step {step} of 5 · {stepsLabels[step - 1]}
-            </span>
-          </div>
-
-          {step === 1 && (
+        <div className="fade-up">
+          {step===1 && (
             <>
-              <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--t1)" }}>What are you working to overcome?</h2>
-              <p className="text-sm mb-6 leading-relaxed" style={{ color: "var(--t2)" }}>Select everything that applies. This shapes your entire recovery plan — there's no judgment here.</p>
-              {ADDICTION_OPTS.map(o => (
-                <button key={o.v} onClick={() => toggleList(addictions, setAddictions, o.v)}
-                  className="w-full flex items-center gap-4 p-4 rounded-2xl mb-3 text-left transition-all duration-150 cursor-pointer"
-                  style={{
-                    background: addictions.includes(o.v) ? "var(--blue-bg)" : "var(--bg)",
-                    border: addictions.includes(o.v) ? "1.5px solid var(--blue-bd)" : "1.5px solid var(--brd)",
-                  }}>
-                  <div className="w-11 h-11 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
-                    style={{ background: o.bg }}>{o.icon}</div>
-                  <div>
-                    <div className="font-semibold text-sm" style={{ color: "var(--t1)" }}>{o.name}</div>
-                    <div className="text-xs mt-0.5" style={{ color: "var(--t2)" }}>{o.meta}</div>
-                  </div>
-                </button>
-              ))}
+              <Eyebrow n={1} label="Getting started"/>
+              <div className="text-[28px] font-black text-[#262E36] mb-2 leading-tight">What are you working to overcome?</div>
+              <p className="text-[15px] text-[#5A6A7A] mb-6 leading-relaxed">Select everything that applies. This shapes your entire recovery plan — there's no judgment here.</p>
+              <div className="flex flex-col gap-3">
+                {[{v:"porn",icon:"🔞",bg:"rgba(229,115,115,.12)",name:"Pornography",meta:"Screen-based adult content addiction"},
+                  {v:"smoking",icon:"🚬",bg:"rgba(247,200,115,.18)",name:"Smoking / Nicotine",meta:"Cigarettes, vapes, nicotine pouches"},
+                  {v:"alcohol",icon:"🍺",bg:"rgba(36,134,219,.1)",name:"Alcohol",meta:"Beer, wine, spirits"},
+                  {v:"screen",icon:"📱",bg:"rgba(168,213,186,.15)",name:"Screen / Social media",meta:"Doom-scrolling, gaming, compulsive browsing"},
+                ].map(o => <SelTaskRow key={o.v} {...o} checked={addictions.includes(o.v)} onClick={()=>toggleArr(addictions,setAddictions,o.v)}/>)}
+              </div>
             </>
           )}
 
-          {step === 2 && (
+          {step===2 && (
             <>
-              <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--t1)" }}>How long has this been a challenge?</h2>
-              <p className="text-sm mb-6 leading-relaxed" style={{ color: "var(--t2)" }}>Understanding the depth of the pattern helps us calibrate your plan.</p>
-              {PERIOD_OPTS.map(o => (
-                <button key={o.v} onClick={() => setPeriod(o.v)}
-                  className="w-full flex items-center gap-4 p-4 rounded-2xl mb-3 text-left transition-all duration-150 cursor-pointer"
-                  style={{
-                    background: period === o.v ? "var(--blue-bg)" : "var(--bg)",
-                    border: period === o.v ? "1.5px solid var(--blue-bd)" : "1.5px solid var(--brd)",
-                  }}>
-                  <div className="w-11 h-11 rounded-xl flex items-center justify-center text-xl flex-shrink-0" style={{ background: "var(--bg4)" }}>{o.icon}</div>
-                  <div className="font-semibold text-sm" style={{ color: "var(--t1)" }}>{o.name}</div>
-                </button>
-              ))}
+              <Eyebrow n={2} label="Your history"/>
+              <div className="text-[28px] font-black text-[#262E36] mb-2 leading-tight">How long has this been a challenge?</div>
+              <p className="text-[15px] text-[#5A6A7A] mb-6 leading-relaxed">Understanding the depth of the pattern helps us calibrate your plan.</p>
+              <div className="flex flex-col gap-3">
+                {[{v:"lt1y",icon:"📅",name:"Less than a year"},{v:"1to3y",icon:"🗓️",name:"1 – 3 years"},
+                  {v:"3to5y",icon:"⏳",name:"3 – 5 years"},{v:"5yp",icon:"🔁",name:"More than 5 years"},
+                ].map(o => <SelTaskRow key={o.v} {...o} bg="rgba(36,134,219,.05)" checked={period===o.v} onClick={()=>setPeriod(o.v)}/>)}
+              </div>
             </>
           )}
 
-          {step === 3 && (
+          {step===3 && (
             <>
-              <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--t1)" }}>When do urges tend to hit hardest?</h2>
-              <p className="text-sm mb-6 leading-relaxed" style={{ color: "var(--t2)" }}>Select all that apply. We'll check in with you during these windows.</p>
+              <Eyebrow n={3} label="Timing"/>
+              <div className="text-[28px] font-black text-[#262E36] mb-2 leading-tight">When do urges tend to hit hardest?</div>
+              <p className="text-[15px] text-[#5A6A7A] mb-6 leading-relaxed">Select all that apply. We'll check in with you during these windows.</p>
               <div className="flex flex-wrap gap-2">
-                {TIMING_CHIPS.map(c => (
-                  <button key={c} onClick={() => toggleList(timing, setTiming, c)}
-                    className="px-4 py-2 rounded-full text-sm font-semibold transition-all duration-150 cursor-pointer"
-                    style={{
-                      background: timing.includes(c) ? "var(--blue-bg)" : "var(--bg3)",
-                      border: timing.includes(c) ? "1.5px solid var(--blue-bd)" : "1.5px solid var(--brd)",
-                      color: timing.includes(c) ? "var(--blue)" : "var(--t2)",
-                      fontFamily: "inherit",
-                    }}>{c}</button>
+                {["🌅 Morning","☀️ Afternoon","🌆 Evening","🌙 Late night","😤 Under stress","😴 When bored","🚶 When alone","🍻 Socially"].map(l => (
+                  <Chip key={l} label={l} checked={timing.includes(l)} onClick={()=>toggleArr(timing,setTiming,l)}/>
                 ))}
               </div>
             </>
           )}
 
-          {step === 4 && (
+          {step===4 && (
             <>
-              <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--t1)" }}>What usually triggers the urge?</h2>
-              <p className="text-sm mb-6 leading-relaxed" style={{ color: "var(--t2)" }}>Knowing your triggers is half the battle. Select everything that resonates.</p>
+              <Eyebrow n={4} label="Triggers"/>
+              <div className="text-[28px] font-black text-[#262E36] mb-2 leading-tight">What usually triggers the urge?</div>
+              <p className="text-[15px] text-[#5A6A7A] mb-6 leading-relaxed">Knowing your triggers is half the battle. Select everything that resonates.</p>
               <div className="flex flex-wrap gap-2">
-                {TRIGGER_CHIPS.map(c => (
-                  <button key={c} onClick={() => toggleList(triggers, setTriggers, c)}
-                    className="px-4 py-2 rounded-full text-sm font-semibold transition-all duration-150 cursor-pointer"
-                    style={{
-                      background: triggers.includes(c) ? "var(--blue-bg)" : "var(--bg3)",
-                      border: triggers.includes(c) ? "1.5px solid var(--blue-bd)" : "1.5px solid var(--brd)",
-                      color: triggers.includes(c) ? "var(--blue)" : "var(--t2)",
-                      fontFamily: "inherit",
-                    }}>{c}</button>
+                {["😰 Stress","😑 Boredom","😔 Loneliness","😟 Anxiety","😡 Anger","😢 Sadness","🎉 Celebrations","😴 Sleeplessness","💔 Rejection","🔄 Pure habit"].map(l => (
+                  <Chip key={l} label={l} checked={triggers.includes(l)} onClick={()=>toggleArr(triggers,setTriggers,l)}/>
                 ))}
               </div>
             </>
           )}
 
-          {step === 5 && (
+          {step===5 && (
             <>
-              <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--t1)" }}>When was your last relapse?</h2>
-              <p className="text-sm mb-6 leading-relaxed" style={{ color: "var(--t2)" }}>This starts your streak counter. Honesty makes the app more effective — it's just between you and Clarity.</p>
-              {RELAPSE_OPTS.map(o => (
-                <button key={o.v} onClick={() => setRelapse(o.v)}
-                  className="w-full flex items-center gap-4 p-4 rounded-2xl mb-3 text-left transition-all duration-150 cursor-pointer"
-                  style={{
-                    background: relapse === o.v ? "var(--blue-bg)" : "var(--bg)",
-                    border: relapse === o.v ? "1.5px solid var(--blue-bd)" : "1.5px solid var(--brd)",
-                  }}>
-                  <div className="w-11 h-11 rounded-xl flex items-center justify-center text-xl flex-shrink-0" style={{ background: o.bg }}>{o.icon}</div>
-                  <div>
-                    <div className="font-semibold text-sm" style={{ color: "var(--t1)" }}>{o.name}</div>
-                    {o.meta && <div className="text-xs mt-0.5" style={{ color: "var(--t2)" }}>{o.meta}</div>}
-                  </div>
-                </button>
-              ))}
+              <Eyebrow n={5} label="Your starting point"/>
+              <div className="text-[28px] font-black text-[#262E36] mb-2 leading-tight">When was your last relapse?</div>
+              <p className="text-[15px] text-[#5A6A7A] mb-6 leading-relaxed">This starts your streak counter. Honesty makes the app more effective.</p>
+              <div className="flex flex-col gap-3">
+                {[{v:"today",icon:"📍",bg:"rgba(229,115,115,.12)",name:"Today — starting fresh right now",meta:"Streak begins at 0 days"},
+                  {v:"1d",icon:"📆",bg:"rgba(36,134,219,.05)",name:"Yesterday",meta:"Streak begins at 1 day"},
+                  {v:"3d",icon:"🌤️",bg:"rgba(36,134,219,.05)",name:"About 3 days ago",meta:"Streak begins at 3 days"},
+                  {v:"1w",icon:"💪",bg:"rgba(168,213,186,.15)",name:"About a week ago",meta:"Streak begins at 7 days"},
+                  {v:"1m",icon:"🏆",bg:"rgba(168,213,186,.15)",name:"Over a month ago",meta:"Streak begins at 30 days"},
+                ].map(o => <SelTaskRow key={o.v} {...o} checked={relapse===o.v} onClick={()=>setRelapse(o.v)}/>)}
+              </div>
             </>
           )}
         </div>
 
-        <div className="flex gap-3 mt-8">
-          {step > 1 && <Btn variant="soft" size="md" onClick={() => setStep(s => s - 1)}>← Back</Btn>}
-          <Btn variant="green" size="lg" full onClick={obNext}>
-            {step === 5 ? "Let's begin →" : "Continue →"}
-          </Btn>
+        <div className="flex gap-2 mt-6">
+          {step>1 && <Btn variant="soft" size="md" onClick={()=>setStep(s=>s-1)}>← Back</Btn>}
+          <Btn variant="green" size="lg" full onClick={next}>{step===5 ? "Let's begin →" : "Continue →"}</Btn>
         </div>
       </div>
     </div>
   );
 }
 
-// ─── Calendar strip helper ─────────────────────────────────────
-function CalendarStrip({ uid, days }) {
-  const [dayMap, setDayMap] = useState({});
-
-  useEffect(() => {
-    const today = new Date();
-    const map = {};
-    for (let i = 0; i < days; i++) {
-      const d = new Date(today); d.setDate(today.getDate() - i);
-      map[d.toDateString()] = "empty";
-    }
-    map[today.toDateString()] = "now";
-    setDayMap({ ...map });
-
-    if (!uid) return;
-    const since = new Date(today); since.setDate(today.getDate() - days + 1); since.setHours(0,0,0,0);
-    getDocs(query(collection(db, "users", uid, "urgelogs"),
-      where("timestamp", ">=", Timestamp.fromDate(since)), orderBy("timestamp", "desc")))
-      .then(snap => {
-        const m = { ...map };
-        snap.forEach(d2 => {
-          const d = d2.data().timestamp?.toDate();
-          if (!d) return;
-          const key = d.toDateString();
-          if (!(key in m)) return;
-          if (d2.data().outcome === "relapsed") m[key] = "bad";
-          else if (m[key] === "empty") m[key] = "ok";
-        });
-        setDayMap(m);
-      }).catch(() => {});
-  }, [uid, days]);
-
-  const today = new Date();
-  const arr = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(today); d.setDate(today.getDate() - i);
-    arr.push({ d, key: d.toDateString(), status: dayMap[d.toDateString()] || "empty" });
-  }
-
-  const dotColor = { ok: "var(--green-d)", bad: "var(--rose)", now: "var(--blue)", empty: "var(--bg4)" };
-  const bg = { ok: "var(--green-bg)", bad: "var(--rose-bg)", now: "var(--blue-bg)", empty: "var(--bg3)" };
-
+// ── NAVBAR ────────────────────────────────────────────────────────────────────
+function Navbar({ screen, streak, dark, onToggleDark, onNav }) {
+  const isApp = !["auth","onboarding"].includes(screen);
   return (
-    <div className="flex gap-1 flex-wrap">
-      {arr.map(({ d, key, status }) => (
-        <div key={key} className="flex flex-col items-center gap-1 flex-1 min-w-[36px] py-2 rounded-xl"
-          style={{ background: bg[status] }}>
-          <div className="text-xs font-bold" style={{ color: "var(--t3)" }}>{DN[d.getDay()]}</div>
-          <div className="text-sm font-bold" style={{ color: "var(--t1)" }}>{d.getDate()}</div>
-          <div className="w-2 h-2 rounded-full" style={{ background: dotColor[status] }} />
-        </div>
-      ))}
-    </div>
+    <nav className="h-16 flex items-center bg-white border-b border-[rgba(36,134,219,.12)] px-6 sticky top-0 z-50 shadow-[0_1px_4px_rgba(36,134,219,.08),0_2px_8px_rgba(0,0,0,.05)]">
+      <button onClick={() => onNav("dashboard")} className="flex items-center gap-2.5 shrink-0 opacity-100 hover:opacity-80 transition-opacity">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#2486DB] to-[#4ECDC4] flex items-center justify-center text-base shadow-[0_2px_10px_rgba(36,134,219,.2)]">🌿</div>
+        <span className="text-xl font-black text-[#2486DB] tracking-tight">Clarity</span>
+      </button>
+      <div className="flex-1"/>
+      <div className="flex items-center gap-2">
+        {isApp && (
+          <div className="inline-flex items-center gap-1.5 bg-[rgba(168,213,186,.15)] border border-[rgba(168,213,186,.4)] rounded-full px-3.5 py-1.5 text-[13px] font-bold text-[#7ABFA0]">
+            🔥 <span>{streak}</span> days
+          </div>
+        )}
+        <NavBtn icon={dark?"🌙":"☀️"} tip="Theme" onClick={onToggleDark}/>
+        {isApp && <NavBtn icon="📊" tip="Analytics" active={screen==="analytics"} onClick={()=>onNav("analytics")}/>}
+        {isApp && <NavBtn icon="👤" tip="Profile" active={screen==="profile"} onClick={()=>onNav("profile")}/>}
+      </div>
+    </nav>
   );
 }
 
-// ─── Dashboard Screen ──────────────────────────────────────────
-function DashboardScreen({ state, onNav, toast, uid }) {
-  const { streak, best, urgesTotal, resisted, userName, addictions } = state;
-  const [quote, setQuote] = useState(QUOTES[Math.floor(Math.random() * QUOTES.length)]);
-  const [mood, setMood] = useState(null);
+function NavBtn({ icon, tip, active, onClick }) {
+  return (
+    <button onClick={onClick} className={`relative w-10 h-10 rounded-xl flex items-center justify-center text-base border-[1.5px] transition-all duration-150
+      ${active ? "bg-[rgba(36,134,219,.1)] border-[rgba(36,134,219,.28)] text-[#2486DB]" : "border-transparent text-[#5A6A7A] hover:bg-[#EEF2F7] hover:text-[#262E36] hover:border-[rgba(36,134,219,.12)]"}`}>
+      {icon}
+      <span className="absolute -bottom-[34px] left-1/2 -translate-x-1/2 bg-[#262E36] text-white text-[11px] font-medium px-2 py-0.5 rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-10 transition-opacity">{tip}</span>
+    </button>
+  );
+}
+
+// ── DASHBOARD ─────────────────────────────────────────────────────────────────
+function Dashboard({ S, urgelogs, onNav, onToast }) {
+  const [quote, setQuote]   = useState(QUOTES[0]);
+  const [mood, setMood]     = useState(null);
 
   useEffect(() => {
-    gemini(`You are a compassionate recovery coach. Write ONE short, powerful, emotionally supportive insight (1-2 sentences max) for someone recovering from ${addictions.join(", ") || "general addiction"} addiction who is on day ${streak} of their streak. Be warm, specific, and science-based. No quote marks needed. Respond with just the insight text.`)
-      .then(t => { if (t) setQuote(t); });
+    async function fetchQuote() {
+      if (GEMINI_API_KEY) {
+        const addStr = (S.addictions||[]).join(", ") || "general addiction";
+        const q = `You are a compassionate recovery coach. Write ONE short, powerful insight (1-2 sentences) for someone recovering from ${addStr} addiction on day ${S.streak}. Be warm, specific, science-based. No quote marks. Just the insight.`;
+        const t = await gemini(q);
+        if (t) setQuote(`"${t}"`);
+      } else {
+        setQuote(QUOTES[Math.floor(Math.random()*QUOTES.length)]);
+      }
+    }
+    fetchQuote();
   }, []);
-
-  const h = new Date().getHours();
-  const greeting = h < 12 ? "Good morning ☀️" : h < 17 ? "Good afternoon ⛅" : h < 21 ? "Good evening 🌆" : "Good night 🌙";
-  const rate = urgesTotal ? Math.round((resisted / urgesTotal) * 100) : 0;
-  const next = nextMilestone(streak);
-  const prev = MILESTONES[MILESTONES.indexOf(next) - 1] || 0;
-  const pct  = prev === next ? 100 : Math.min(Math.round(((streak - prev) / (next - prev)) * 100), 100);
-
-  const streakChip = streak === 0
-    ? { text: "🌱 Day 1 — a fresh start", bg: "var(--blue-bg)", border: "var(--blue-bd)", color: "var(--blue)" }
-    : streak < 7
-    ? { text: "🔥 Building momentum", bg: "var(--green-bg)", border: "var(--green-bd)", color: "var(--green-d)" }
-    : streak < 30
-    ? { text: `⚡ On a roll — ${streak} days!`, bg: "var(--green-bg)", border: "var(--green-bd)", color: "var(--green-d)" }
-    : { text: `🏆 Incredible — ${streak} days!`, bg: "var(--amber-bg)", border: "var(--amber-bd)", color: "#6B4E0A" };
-
-  const moods = ["💪 Strong","😌 Calm","😐 Neutral","😰 Struggling","😡 Frustrated"];
 
   function logMood(m) {
     setMood(m);
-    if (uid) addDoc(collection(db, "users", uid, "moods"), { mood: m, timestamp: serverTimestamp() }).catch(() => {});
-    toast("Mood logged: " + m);
+    if (S.uid) {
+      addDoc(collection(db, "users", S.uid, "moods"), {
+        mood: m, timestamp: serverTimestamp()
+      }).catch(()=>{});
+    }
+    onToast("Mood logged: " + m);
   }
 
+  const h     = new Date().getHours();
+  const greet = h<12?"Good morning ☀️":h<17?"Good afternoon ⛅":h<21?"Good evening 🌆":"Good night 🌙";
+  const next  = nextMilestone(S.streak);
+  const prev  = MILESTONES[MILESTONES.indexOf(next)-1] || 0;
+  const pct   = prev===next ? 100 : Math.round(((S.streak-prev)/(next-prev))*100);
+
+  let chipStyle = "bg-[rgba(168,213,186,.15)] border-[rgba(168,213,186,.4)] text-[#7ABFA0]";
+  let chipText  = "🌱 Just getting started";
+  if (S.streak === 0) { chipStyle="bg-[rgba(36,134,219,.1)] border-[rgba(36,134,219,.28)] text-[#2486DB]"; chipText="🌱 Day 1 — a fresh start"; }
+  else if (S.streak < 7) chipText = "🔥 Building momentum";
+  else if (S.streak < 30) chipText = `⚡ On a roll — ${S.streak} days!`;
+  else { chipStyle="bg-[rgba(247,200,115,.18)] border-[rgba(247,200,115,.4)] text-[#6B4E0A]"; chipText=`🏆 Incredible — ${S.streak} days!`; }
+
+  const rate = S.urgesTotal ? Math.round((S.resisted/S.urgesTotal)*100) : 0;
+
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8 pb-20 screen-enter">
+    <div className="max-w-[960px] mx-auto px-6 py-8 pb-16">
       {/* Greeting */}
       <div className="mb-6">
-        <div className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "var(--t3)" }}>{greeting}</div>
-        <div className="text-2xl font-bold" style={{ color: "var(--t1)" }}>Welcome back, {userName} 👋</div>
+        <div className="text-[13px] font-medium text-[#959CA3] mb-2">{greet}</div>
+        <div className="text-2xl font-bold text-[#262E36]">Welcome back, {S.userName} 👋</div>
       </div>
 
-      {/* Streak hero */}
-      <div className="grid gap-4 mb-6" style={{ gridTemplateColumns: "2fr 1fr" }}>
-        <div className="rounded-3xl overflow-hidden relative min-h-[200px]"
-          style={{ background: "var(--card)", border: "1px solid var(--brd)", boxShadow: "var(--sh-md)" }}>
+      {/* Streak hero + mini cards */}
+      <div className="grid grid-cols-[2fr_1fr] gap-4 mb-8 max-sm:grid-cols-1">
+        {/* Main streak card */}
+        <div className="bg-white border border-[rgba(36,134,219,.12)] rounded-2xl shadow-[0_4px_16px_rgba(36,134,219,.12)] overflow-hidden relative min-h-[200px]">
           {/* Atmospheric bg */}
-          <div className="absolute inset-0 pointer-events-none overflow-hidden">
-            <div className="absolute rounded-full" style={{ width: 320, height: 320, top: -100, left: -80, background: "radial-gradient(circle, rgba(36,134,219,.08) 0%, transparent 60%)" }} />
-            <div className="absolute rounded-full" style={{ width: 220, height: 220, bottom: -70, right: 60, background: "radial-gradient(circle, rgba(168,213,186,.12) 0%, transparent 60%)" }} />
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute w-80 h-80 rounded-full -top-24 -left-20" style={{background:"radial-gradient(circle,rgba(36,134,219,.08),transparent 60%)"}}/>
+            <div className="absolute w-56 h-56 rounded-full -bottom-16 right-12" style={{background:"radial-gradient(circle,rgba(168,213,186,.12),transparent 60%)"}}/>
           </div>
-          <div className="absolute right-5 text-8xl opacity-5 select-none" style={{ top: "50%", transform: "translateY(-50%)", lineHeight: 1 }}>🔥</div>
-          <div className="relative z-10 p-6">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="w-1.5 h-1.5 rounded-full streak-dot" style={{ background: "var(--green-d)" }} />
-              <span className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--green-d)" }}>Current streak</span>
+          <div className="absolute right-5 top-1/2 -translate-y-1/2 text-[88px] opacity-[.05] select-none leading-none z-[1]">🔥</div>
+          <div className="relative z-[2] p-6">
+            <div className="inline-flex items-center gap-1.5 text-[12px] font-bold tracking-[.07em] uppercase text-[#7ABFA0] mb-2.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#7ABFA0] pulse-slow"/>Current streak
             </div>
-            <div className="flex items-baseline gap-2 mb-2" style={{ lineHeight: 1 }}>
-              <span className="font-black" style={{ fontSize: 72, letterSpacing: "-.04em", color: "var(--blue)", lineHeight: .88 }}>{streak}</span>
-              <span className="text-lg font-semibold" style={{ color: "var(--t2)" }}>days<br/>clean</span>
+            <div className="flex items-baseline gap-2.5 leading-none mb-2">
+              <span className="text-[80px] font-black tracking-tighter leading-[.88] text-[#2486DB] max-sm:text-[64px]">{S.streak}</span>
+              <span className="text-lg font-semibold text-[#5A6A7A] leading-tight">days<br/>clean</span>
             </div>
-            <div className="text-sm mb-3" style={{ color: "var(--t2)" }}>Personal best: <strong style={{ color: "var(--t1)" }}>{best} days</strong></div>
-            <div className="inline-block px-3 py-1 rounded-full text-xs font-bold mb-4"
-              style={{ background: streakChip.bg, border: `1px solid ${streakChip.border}`, color: streakChip.color }}>
-              {streakChip.text}
+            <div className="text-sm text-[#5A6A7A] mb-4">Personal best: <strong className="text-[#F7C873] font-bold">{S.best} days</strong></div>
+            <div className={`inline-flex items-center gap-1.5 text-sm font-bold px-3 py-1 rounded-full border mb-4 ${chipStyle}`}>{chipText}</div>
+            <div className="h-1.5 bg-[#EEF2F7] rounded-full overflow-hidden">
+              <div className="h-full rounded-full bg-gradient-to-r from-[#2486DB] to-[#4ECDC4] transition-all duration-[1s]" style={{width:`${Math.min(pct,100)}%`}}/>
             </div>
-            <div className="h-1.5 rounded-full mb-1 overflow-hidden" style={{ background: "var(--bg4)" }}>
-              <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: "linear-gradient(90deg,var(--blue),var(--teal))" }} />
-            </div>
-            <div className="flex justify-between text-xs font-medium mt-1" style={{ color: "var(--t3)" }}>
-              <span>Day {streak}</span>
-              <span>{streak >= next ? `🏆 ${next}-day milestone!` : `Next milestone: ${next} days`}</span>
+            <div className="flex justify-between text-[12px] text-[#959CA3] mt-1.5">
+              <span>Day {S.streak}</span>
+              <span>{S.streak >= next ? `🏆 ${next}-day milestone!` : `Next milestone: ${next} days`}</span>
             </div>
           </div>
         </div>
 
-        <div className="flex flex-col gap-4">
-          {[{ val: urgesTotal, lbl: "Urges logged", color: "var(--blue)" }, { val: rate + "%", lbl: "Resistance rate", color: "var(--green-d)" }].map(x => (
-            <div key={x.lbl} className="flex-1 rounded-2xl flex flex-col items-center justify-center p-4"
-              style={{ background: "var(--card)", border: "1px solid var(--brd)", boxShadow: "var(--sh)" }}>
-              <div className="text-3xl font-black" style={{ color: x.color }}>{x.val}</div>
-              <div className="text-xs font-semibold mt-1 text-center" style={{ color: "var(--t2)" }}>{x.lbl}</div>
-            </div>
-          ))}
+        {/* Mini cards */}
+        <div className="flex flex-col gap-4 max-sm:flex-row">
+          <div className="flex-1 bg-white border border-[rgba(36,134,219,.12)] rounded-2xl shadow-[0_1px_4px_rgba(36,134,219,.08)] p-6">
+            <div className="text-[36px] font-black tracking-tight leading-none text-[#2486DB]">{S.urgesTotal}</div>
+            <div className="text-[13px] text-[#5A6A7A] mt-1.5">Urges logged</div>
+          </div>
+          <div className="flex-1 bg-white border border-[rgba(36,134,219,.12)] rounded-2xl shadow-[0_1px_4px_rgba(36,134,219,.08)] p-6">
+            <div className="text-[36px] font-black tracking-tight leading-none text-[#7ABFA0]">{S.urgesTotal ? rate+"%" : "—"}</div>
+            <div className="text-[13px] text-[#5A6A7A] mt-1.5">Resistance rate</div>
+          </div>
         </div>
       </div>
 
       {/* Urge CTA */}
-      <div className="rounded-3xl p-6 mb-6 relative overflow-hidden"
-        style={{ background: "linear-gradient(135deg,var(--rose-bg) 0%,rgba(247,200,115,.06) 100%)", border: "1.5px solid var(--rose-bd)" }}>
-        <div className="absolute rounded-full pointer-events-none" style={{ width: 180, height: 180, top: -50, right: -50, background: "radial-gradient(circle,rgba(229,115,115,.07),transparent 65%)" }} />
-        <div className="flex items-center gap-1.5 mb-3">
-          <span className="w-2 h-2 rounded-full pulse-dot" style={{ background: "var(--rose)" }} />
-          <span className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--rose)" }}>Right now</span>
+      <div className="mb-8 rounded-2xl border-[1.5px] border-[rgba(229,115,115,.28)] p-6 relative overflow-hidden"
+        style={{background:"linear-gradient(135deg,rgba(229,115,115,.12),rgba(247,200,115,.06))"}}>
+        <div className="absolute -top-12 -right-12 w-44 h-44 rounded-full pointer-events-none" style={{background:"radial-gradient(circle,rgba(229,115,115,.07),transparent 65%)"}}/>
+        <div className="inline-flex items-center gap-1.5 text-[12px] font-bold tracking-[.07em] uppercase text-[#E57373] mb-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#E57373] pulse"/>Right now
         </div>
-        <h3 className="text-xl font-bold mb-2" style={{ color: "var(--t1)" }}>Is something trying to break your streak?</h3>
-        <p className="text-sm leading-relaxed mb-5" style={{ color: "var(--t2)" }}>You don't have to fight this alone. Log the urge and we'll walk you through it — one gentle step at a time.</p>
+        <h3 className="text-xl font-bold text-[#262E36] mb-2 leading-tight">Is something trying to break your streak?</h3>
+        <p className="text-[15px] text-[#5A6A7A] leading-relaxed mb-5">You don't have to fight this alone. Log the urge and we'll walk you through it — one gentle step at a time.</p>
         <button onClick={() => onNav("urge")}
-          className="w-full h-14 flex items-center justify-between px-6 rounded-2xl font-bold text-base cursor-pointer transition-all duration-200 hover:-translate-y-0.5"
-          style={{ background: "var(--rose)", color: "#fff", border: "none", fontFamily: "inherit", boxShadow: "0 4px 18px rgba(229,115,115,.33)" }}>
+          className="flex items-center justify-between w-full h-[52px] px-[22px] bg-[#E57373] text-white rounded-2xl text-base font-bold shadow-[0_4px_18px_rgba(229,115,115,.33)] hover:-translate-y-0.5 hover:shadow-[0_8px_28px_rgba(229,115,115,.45)] transition-all duration-250">
           <span>I'm feeling an urge right now</span>
-          <span className="w-8 h-8 flex items-center justify-center rounded-lg" style={{ background: "rgba(255,255,255,.2)" }}>→</span>
+          <span className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">→</span>
         </button>
       </div>
 
       {/* AI Insight */}
-      <div className="mb-6">
-        <InsightBox icon="✨" label="AI Daily Insight" text={quote} />
+      <div className="mb-8">
+        <InsightBox icon="✨" label="AI Daily Insight" text={quote}/>
       </div>
 
       {/* Week calendar */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-base font-bold" style={{ color: "var(--t1)" }}>This week</div>
-          <button onClick={() => onNav("analytics")} className="text-sm font-semibold" style={{ color: "var(--blue)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>View all analytics →</button>
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-base font-bold text-[#262E36]">This week</span>
+          <button onClick={() => onNav("analytics")} className="text-[13px] text-[#2486DB] font-semibold hover:underline">View all analytics →</button>
         </div>
-        <Card>
-          <div className="p-5">
-            <CalendarStrip uid={uid} days={7} />
-            <div className="flex gap-4 mt-3 text-xs font-medium" style={{ color: "var(--t3)" }}>
-              <span>🟢 Resisted</span><span>🔴 Relapsed</span><span>🔵 Today</span>
-            </div>
+        <div className="bg-white border border-[rgba(36,134,219,.12)] rounded-2xl shadow-[0_1px_4px_rgba(36,134,219,.08)] p-6">
+          <CalStrip logs={urgelogs} days={7}/>
+          <div className="flex gap-3 mt-4 text-[12px] text-[#959CA3] font-medium">
+            <span>🟢 Resisted</span><span>🔴 Relapsed</span><span>🔵 Today</span>
           </div>
-        </Card>
+        </div>
       </div>
 
-      {/* Mood */}
-      <div className="mb-6">
-        <div className="text-base font-bold mb-3" style={{ color: "var(--t1)" }}>How are you feeling today?</div>
-        <Card>
-          <div className="p-5">
-            <p className="text-sm mb-4" style={{ color: "var(--t2)" }}>A quick check-in helps us support you better. There are no wrong answers.</p>
-            <div className="flex flex-wrap gap-2">
-              {moods.map(m => (
-                <button key={m} onClick={() => logMood(m)}
-                  className="px-4 py-2 rounded-full text-sm font-semibold transition-all duration-150 cursor-pointer"
-                  style={{
-                    background: mood === m ? "var(--blue-bg)" : "var(--bg3)",
-                    border: mood === m ? "1.5px solid var(--blue-bd)" : "1.5px solid var(--brd)",
-                    color: mood === m ? "var(--blue)" : "var(--t2)",
-                    fontFamily: "inherit",
-                  }}>{m}</button>
-              ))}
-            </div>
+      {/* Mood check-in */}
+      <div>
+        <div className="text-base font-bold text-[#262E36] mb-4">How are you feeling today?</div>
+        <div className="bg-white border border-[rgba(36,134,219,.12)] rounded-2xl shadow-[0_1px_4px_rgba(36,134,219,.08)] p-6">
+          <p className="text-sm text-[#5A6A7A] mb-4">A quick check-in helps us support you better. There are no wrong answers.</p>
+          <div className="flex flex-wrap gap-2">
+            {["💪 Strong","😌 Calm","😐 Neutral","😰 Struggling","😡 Frustrated"].map(m => (
+              <button key={m} onClick={() => logMood(m)}
+                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full border-[1.5px] text-sm font-medium transition-all duration-150
+                  ${mood===m
+                    ? "bg-[rgba(36,134,219,.1)] border-[#2486DB] text-[#2486DB] font-semibold"
+                    : "border-[rgba(36,134,219,.22)] bg-[#EEF2F7] text-[#5A6A7A] hover:border-[rgba(36,134,219,.28)] hover:text-[#2486DB] hover:bg-[rgba(36,134,219,.1)]"}`}>
+                {m}
+              </button>
+            ))}
           </div>
-        </Card>
-      </div>
-
-      {/* Log relapse */}
-      <Card style={{ borderColor: "var(--rose-bd)" }}>
-        <div className="p-5 flex items-center justify-between gap-4">
-          <div>
-            <div className="font-bold mb-1" style={{ color: "var(--rose)", fontSize: 15 }}>Had a relapse?</div>
-            <p className="text-xs leading-relaxed" style={{ color: "var(--t2)" }}>Logging it resets your streak, but your personal best stays. It helps the AI build a better plan.</p>
-          </div>
-          <Btn variant="danger" size="md" style={{ flexShrink: 0 }} onClick={() => onNav("relapse-modal")}>Log relapse</Btn>
         </div>
-      </Card>
+      </div>
     </div>
   );
 }
 
-// ─── Urge Screen ───────────────────────────────────────────────
-function UrgeScreen({ state, setState, onNav, toast, uid }) {
-  const [urgeType, setUrgeType] = useState(null);
+// ── LOG URGE SCREEN ───────────────────────────────────────────────────────────
+function UrgeScreen({ S, onNav, onSubmit, customTypes, onAddType, onToast }) {
+  const [urgeType, setUrgeType]   = useState(null);
   const [intensity, setIntensity] = useState(5);
-  const [trigger, setTrigger] = useState(null);
+  const [trigger, setTrigger]     = useState(null);
   const [otherText, setOtherText] = useState("");
   const [showOther, setShowOther] = useState(false);
-  const [customModal, setCustomModal] = useState(false);
-  const [customEmoji, setCustomEmoji] = useState("");
-  const [customName, setCustomName] = useState("");
-  const [customTypes, setCustomTypes] = useState([]);
+  const [addModal, setAddModal]   = useState(false);
+  const [cEmoji, setCEmoji]       = useState("");
+  const [cName, setCName]         = useState("");
 
-  const IL_LABELS = ["","Very mild","Mild","Mild","Moderate","Moderate","Strong","Strong","Very strong","Extreme","Overwhelming"];
-  const IL_COLORS = ["","var(--green-d)","var(--green-d)","var(--green-d)","var(--blue)","var(--blue)","#B07D00","#B07D00","var(--rose)","var(--rose)","var(--rose)"];
-  const IL_BG     = ["","var(--green-bg)","var(--green-bg)","var(--green-bg)","var(--blue-bg)","var(--blue-bg)","var(--amber-bg)","var(--amber-bg)","var(--rose-bg)","var(--rose-bg)","var(--rose-bg)"];
-
-  const URGE_TYPES = [
-    { v: "porn",    icon: "🔞", name: "Pornography",           bg: "var(--rose-bg)" },
-    { v: "smoking", icon: "🚬", name: "Smoking / Nicotine",    bg: "var(--amber-bg)" },
-    { v: "alcohol", icon: "🍺", name: "Alcohol",               bg: "var(--blue-bg)" },
-    { v: "screen",  icon: "📱", name: "Screen / Social media", bg: "var(--green-bg)" },
-    ...customTypes,
-  ];
-  const TRIGGER_CHIPS = ["😰 Stress","😑 Boredom","😔 Loneliness","😟 Anxiety","😡 Anger","😢 Sadness","🔄 Habit"];
+  const IL_BG    = ["","rgba(168,213,186,.15)","rgba(168,213,186,.15)","rgba(168,213,186,.15)","rgba(36,134,219,.1)","rgba(36,134,219,.1)","rgba(247,200,115,.18)","rgba(247,200,115,.18)","rgba(229,115,115,.12)","rgba(229,115,115,.12)","rgba(229,115,115,.12)"];
+  const IL_COLOR = ["","#7ABFA0","#7ABFA0","#7ABFA0","#2486DB","#2486DB","#B07D00","#B07D00","#E57373","#E57373","#E57373"];
 
   async function submit() {
-    if (!urgeType) { toast("Please let us know what type of urge this is"); return; }
-    if (!trigger)  { toast("Please select what triggered this feeling"); return; }
-    if (trigger === "other" && !otherText.trim()) { toast("Please describe what happened in a few words"); return; }
-
-    let logId = null;
-    if (uid) {
-      try {
-        const ref = await addDoc(collection(db, "users", uid, "urgelogs"), {
-          timestamp: serverTimestamp(), urgeType, intensity,
-          trigger, triggerText: trigger === "other" ? otherText : "",
-          outcome: "pending", taskUsed: null,
-        });
-        await updateDoc(doc(db, "users", uid), { urgesTotal: increment(1) });
-        logId = ref.id;
-      } catch {}
-    }
-    setState(s => ({ ...s, urgeType, intensity, trigger, currentUrgeLogId: logId, urgesTotal: s.urgesTotal + 1 }));
-    onNav("task");
+    if (!urgeType) { onToast("Please let us know what type of urge this is"); return; }
+    if (!trigger)  { onToast("Please select what triggered this feeling"); return; }
+    if (trigger==="other" && !otherText.trim()) { onToast("Please describe what happened"); return; }
+    onSubmit({ urgeType, intensity, trigger, otherText: trigger==="other"?otherText:"" });
   }
 
-  function addCustom() {
-    if (!customName.trim()) { toast("Please enter a name for this type"); return; }
-    const t = { v: customName.toLowerCase().replace(/\s/g,"_"), icon: customEmoji||"❓", name: customName, bg: "var(--bg3)" };
-    setCustomTypes(c => [...c, t]);
-    setCustomEmoji(""); setCustomName(""); setCustomModal(false);
-    toast((customEmoji||"❓") + " " + customName + " added!");
-  }
+  const baseTypes = [
+    {v:"porn",icon:"🔞",bg:"rgba(229,115,115,.12)",name:"Pornography"},
+    {v:"smoking",icon:"🚬",bg:"rgba(247,200,115,.18)",name:"Smoking / Nicotine"},
+    {v:"alcohol",icon:"🍺",bg:"rgba(36,134,219,.1)",name:"Alcohol"},
+    {v:"screen",icon:"📱",bg:"rgba(168,213,186,.15)",name:"Screen / Social media"},
+    ...customTypes,
+  ];
 
   return (
-    <div className="max-w-xl mx-auto px-6 py-8 pb-20 screen-enter">
-      <div className="flex items-center gap-3 mb-6">
+    <div className="max-w-[640px] mx-auto px-6 py-8 pb-16">
+      <div className="flex items-center gap-3 mb-8">
         <Btn variant="soft" size="sm" onClick={() => onNav("dashboard")}>← Back</Btn>
-        <div className="text-xl font-bold" style={{ color: "var(--t1)" }}>Log this urge</div>
+        <div className="text-xl font-semibold text-[#262E36]">Log this urge</div>
       </div>
 
-      <InsightBox icon="🧠" label="You're doing the right thing"
-        text="Logging an urge instead of acting on it is already a win. Let's understand what's happening and find you the right support." />
+      <div className="mb-8">
+        <InsightBox icon="🧠" label="You're doing the right thing" text="Logging an urge instead of acting on it is already a win. Let's understand what's happening and find you the right support."/>
+      </div>
 
       {/* Type */}
-      <div className="mt-6 mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-base font-bold" style={{ color: "var(--t1)" }}>What type of urge is this?</div>
-          <Btn variant="ghost" size="sm" onClick={() => setCustomModal(true)}>+ Add custom</Btn>
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-base font-bold text-[#262E36]">What type of urge is this?</span>
+          <Btn variant="ghost" size="sm" onClick={() => setAddModal(true)}>+ Add custom</Btn>
         </div>
-        {URGE_TYPES.map(o => (
-          <button key={o.v} onClick={() => setUrgeType(o.v)}
-            className="w-full flex items-center gap-4 p-4 rounded-2xl mb-2 text-left cursor-pointer transition-all duration-150"
-            style={{
-              background: urgeType === o.v ? "var(--blue-bg)" : "var(--bg)",
-              border: urgeType === o.v ? "1.5px solid var(--blue-bd)" : "1.5px solid var(--brd)",
-              fontFamily: "inherit",
-            }}>
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl" style={{ background: o.bg }}>{o.icon}</div>
-            <div className="font-semibold text-sm" style={{ color: "var(--t1)" }}>{o.name}</div>
-          </button>
-        ))}
+        <div className="flex flex-col gap-2">
+          {baseTypes.map(t => (
+            <TaskRow key={t.v} task={{...t,id:t.v,desc:"",dur:0,levels:[]}} selected={urgeType===t.v}
+              onSelect={() => setUrgeType(t.v)}/>
+          ))}
+        </div>
       </div>
 
       {/* Intensity */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-base font-bold" style={{ color: "var(--t1)" }}>How intense does it feel?</div>
-          <span className="text-xs font-bold px-3 py-1 rounded-full"
-            style={{ background: IL_BG[intensity], color: IL_COLORS[intensity] }}>
-            {intensity} / 10 · {IL_LABELS[intensity]}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-base font-bold text-[#262E36]">How intense does it feel?</span>
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-[13px] font-semibold"
+            style={{background:IL_BG[intensity],color:IL_COLOR[intensity]}}>
+            {intensity} / 10 · {IL[intensity]}
           </span>
         </div>
         <div className="flex gap-1.5">
           {[1,2,3,4,5,6,7,8,9,10].map(v => (
             <button key={v} onClick={() => setIntensity(v)}
-              className="flex-1 h-10 rounded-xl text-sm font-bold cursor-pointer transition-all duration-150"
-              style={{
-                background: intensity === v ? (v >= 8 ? "var(--rose)" : v >= 5 ? "var(--amber)" : "var(--blue)") : "var(--bg3)",
-                color: intensity === v ? "#fff" : "var(--t2)",
-                border: intensity === v ? "none" : "1px solid var(--brd)",
-                fontFamily: "inherit",
-              }}>{v}</button>
+              className={`flex-1 h-11 rounded-xl border-[1.5px] text-sm font-bold transition-all duration-150
+                ${intensity===v && v<=7 ? "bg-[rgba(36,134,219,.1)] border-[#2486DB] text-[#2486DB]"
+                  : intensity===v && v>7 ? "bg-[rgba(229,115,115,.12)] border-[#E57373] text-[#E57373]"
+                  : v>7 ? "border-[rgba(229,115,115,.28)] bg-[#EEF2F7] text-[#5A6A7A] hover:border-[rgba(229,115,115,.28)]"
+                  : "border-[rgba(36,134,219,.22)] bg-[#EEF2F7] text-[#5A6A7A] hover:border-[rgba(36,134,219,.28)]"}`}>
+              {v}
+            </button>
           ))}
         </div>
-        <div className="flex justify-between text-xs mt-2 font-medium" style={{ color: "var(--t3)" }}>
+        <div className="flex justify-between text-[13px] font-medium text-[#959CA3] mt-2">
           <span>Mild — I can manage</span><span>Overwhelming</span>
         </div>
       </div>
 
       {/* Trigger */}
       <div className="mb-8">
-        <div className="text-base font-bold mb-3" style={{ color: "var(--t1)" }}>What triggered this feeling?</div>
-        <div className="flex flex-wrap gap-2 mb-3">
-          {TRIGGER_CHIPS.map(c => (
-            <button key={c} onClick={() => { setTrigger(c); setShowOther(false); }}
-              className="px-4 py-2 rounded-full text-sm font-semibold cursor-pointer transition-all duration-150"
-              style={{
-                background: trigger === c ? "var(--blue-bg)" : "var(--bg3)",
-                border: trigger === c ? "1.5px solid var(--blue-bd)" : "1.5px solid var(--brd)",
-                color: trigger === c ? "var(--blue)" : "var(--t2)",
-                fontFamily: "inherit",
-              }}>{c}</button>
+        <div className="text-base font-bold text-[#262E36] mb-4">What triggered this feeling?</div>
+        <div className="flex flex-wrap gap-2">
+          {["😰 Stress","😑 Boredom","😔 Loneliness","😟 Anxiety","😡 Anger","😢 Sadness","🔄 Habit"].map(t => (
+            <button key={t} onClick={() => { setTrigger(t); setShowOther(false); }}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full border-[1.5px] text-sm font-medium transition-all duration-150
+                ${trigger===t
+                  ? "bg-[rgba(36,134,219,.1)] border-[#2486DB] text-[#2486DB] font-semibold"
+                  : "border-[rgba(36,134,219,.22)] bg-[#EEF2F7] text-[#5A6A7A] hover:border-[rgba(36,134,219,.28)] hover:text-[#2486DB]"}`}>
+              {t}
+            </button>
           ))}
           <button onClick={() => { setTrigger("other"); setShowOther(true); }}
-            className="px-4 py-2 rounded-full text-sm font-semibold cursor-pointer transition-all duration-150"
-            style={{
-              background: trigger === "other" ? "var(--blue-bg)" : "var(--bg3)",
-              border: trigger === "other" ? "1.5px solid var(--blue-bd)" : "1.5px solid var(--brd)",
-              color: trigger === "other" ? "var(--blue)" : "var(--t2)",
-              fontFamily: "inherit",
-            }}>💭 Other</button>
+            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full border-[1.5px] text-sm font-medium transition-all duration-150
+              ${trigger==="other"
+                ? "bg-[rgba(36,134,219,.1)] border-[#2486DB] text-[#2486DB] font-semibold"
+                : "border-[rgba(36,134,219,.22)] bg-[#EEF2F7] text-[#5A6A7A] hover:border-[rgba(36,134,219,.28)]"}`}>
+            💭 Other
+          </button>
         </div>
         {showOther && (
-          <div className="screen-enter">
-            <InsightBox icon="🧠" label="" text="Describe what happened in your own words. The AI will analyse this over time and surface patterns in your analytics." />
-            <textarea className="w-full mt-3 p-4 rounded-2xl text-sm resize-none outline-none transition-all duration-150"
-              style={{ background: "var(--bg3)", border: "1.5px solid var(--brd)", color: "var(--t1)", fontFamily: "inherit", lineHeight: 1.6, minHeight: 80 }}
-              rows={3} placeholder="e.g. I saw an old photo, felt dismissed in a conversation..."
-              value={otherText} onChange={e => setOtherText(e.target.value)} />
+          <div className="mt-4 fade-up">
+            <div className="mb-3">
+              <InsightBox icon="🧠" label="" text="Describe what happened in your own words. The AI will analyse this over time and surface patterns."/>
+            </div>
+            <textarea value={otherText} onChange={e=>setOtherText(e.target.value)} rows={3}
+              placeholder="e.g. I saw an old photo, felt dismissed in a conversation..."
+              className="w-full bg-white border border-[rgba(36,134,219,.22)] rounded-xl px-4 py-3 text-[15px] text-[#262E36] outline-none resize-y leading-relaxed placeholder:text-[#959CA3] focus:border-[#2486DB] focus:shadow-[0_0_0_3px_rgba(36,134,219,.1)]"/>
           </div>
         )}
       </div>
 
       <Btn variant="green" size="lg" full onClick={submit}>Find me a task →</Btn>
 
-      {/* Custom modal */}
-      <Modal open={customModal} onClose={() => setCustomModal(false)}
+      {/* Add custom modal */}
+      <Modal open={addModal} onClose={() => setAddModal(false)}
         title="Add a custom urge type"
         body="Give it a name and emoji. It'll appear in your urge log list."
         actions={<>
-          <Btn variant="soft" size="md" full onClick={() => setCustomModal(false)}>Cancel</Btn>
-          <Btn variant="primary" size="md" full onClick={addCustom}>Add type</Btn>
+          <Btn variant="soft" size="md" onClick={() => setAddModal(false)} className="flex-1">Cancel</Btn>
+          <Btn variant="primary" size="md" className="flex-1" onClick={() => {
+            if (!cName.trim()) { onToast("Please enter a name"); return; }
+            onAddType({ v: cName.toLowerCase().replace(/\s/g,"_"), icon: cEmoji||"❓", bg:"rgba(36,134,219,.05)", name: cName.trim() });
+            setCEmoji(""); setCName(""); setAddModal(false);
+            onToast((cEmoji||"❓")+" "+cName+" added!");
+          }}>Add type</Btn>
         </>}>
-        <div className="mb-4">
-          <label className="text-xs font-bold uppercase tracking-widest block mb-1" style={{ color: "var(--t3)" }}>Emoji</label>
-          <input className="w-20 h-12 rounded-xl text-center text-2xl outline-none"
-            style={{ background: "var(--bg3)", border: "1.5px solid var(--brd)", fontFamily: "inherit" }}
-            maxLength={4} value={customEmoji} onChange={e => setCustomEmoji(e.target.value)} placeholder="🎮" />
+        <div className="mb-3">
+          <label className="block text-sm font-semibold text-[#262E36] mb-1.5">Emoji icon</label>
+          <input value={cEmoji} onChange={e=>setCEmoji(e.target.value)} placeholder="e.g. 🎮" maxLength={4}
+            className="w-20 text-center text-2xl bg-white border border-[rgba(36,134,219,.22)] rounded-xl px-3 py-2 outline-none focus:border-[#2486DB]"/>
         </div>
-        <div>
-          <label className="text-xs font-bold uppercase tracking-widest block mb-1" style={{ color: "var(--t3)" }}>Name</label>
-          <input className="w-full h-12 px-4 rounded-xl text-sm outline-none"
-            style={{ background: "var(--bg3)", border: "1.5px solid var(--brd)", color: "var(--t1)", fontFamily: "inherit" }}
-            placeholder="e.g. Gaming, Gambling..." value={customName} onChange={e => setCustomName(e.target.value)} />
+        <div className="mb-4">
+          <label className="block text-sm font-semibold text-[#262E36] mb-1.5">Name</label>
+          <input value={cName} onChange={e=>setCName(e.target.value)} placeholder="e.g. Gaming, Gambling, Shopping..."
+            className="w-full bg-white border border-[rgba(36,134,219,.22)] rounded-xl px-4 py-3 text-[15px] outline-none focus:border-[#2486DB]"/>
         </div>
       </Modal>
     </div>
   );
 }
 
-// ─── Task Picker Screen ───────────────────────────────────────
-function TaskScreen({ state, setState, onNav, toast }) {
-  const lv = iLevel(state.intensity);
-  const rec   = ALL_TASKS.filter(t => t.levels.includes(lv));
-  const other = ALL_TASKS.filter(t => !t.levels.includes(lv));
-  const [selected, setSelected] = useState(rec[0]?.id || "breathing");
+// ── TASK PICKER ───────────────────────────────────────────────────────────────
+function TaskScreen({ S, urgeCtx, onNav, onStart, onToast }) {
+  const [selectedId, setSelectedId] = useState(null);
   const [aiRec, setAiRec] = useState("Based on your intensity and trigger, a breathing exercise will interrupt the urge cycle most effectively right now.");
 
+  const lv  = iLevel(urgeCtx.intensity);
+  const rec = ALL_TASKS.filter(t => t.levels.includes(lv));
+  const oth = ALL_TASKS.filter(t => !t.levels.includes(lv));
+
   useEffect(() => {
-    setState(s => ({ ...s, task: rec[0] || ALL_TASKS[0] }));
-    gemini(`You are a recovery coach. Someone is experiencing a ${state.urgeType} urge at intensity ${state.intensity}/10, triggered by ${state.trigger}. Write ONE short, compassionate recommendation (2 sentences max) for which type of recovery task would help most right now. Be specific and warm. Just the recommendation, no preamble.`)
-      .then(t => { if (t) setAiRec(t); });
+    if (!selectedId) setSelectedId(rec[0]?.id);
+    async function fetchRec() {
+      if (GEMINI_API_KEY) {
+        const q = `You are a recovery coach. Someone has a ${urgeCtx.urgeType} urge at intensity ${urgeCtx.intensity}/10, triggered by ${urgeCtx.trigger}. Write ONE short compassionate recommendation (2 sentences max) for a ${lv}-intensity recovery task. Be specific and warm. Just the recommendation.`;
+        const t = await gemini(q);
+        if (t) setAiRec(t);
+      }
+    }
+    fetchRec();
   }, []);
 
-  function selectTask(t) {
-    setSelected(t.id);
-    setState(s => ({ ...s, task: t }));
-  }
+  const selTask = ALL_TASKS.find(t => t.id === selectedId) || rec[0];
+
+  const SecLabel = ({ text, color }) => (
+    <div className={`flex items-center gap-1.5 text-[12px] font-bold tracking-[.06em] uppercase mb-2.5`} style={{color}}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{background:color}}/>
+      {text}
+    </div>
+  );
 
   return (
-    <div className="max-w-xl mx-auto px-6 py-8 pb-20 screen-enter">
-      <div className="flex items-center gap-3 mb-6">
+    <div className="max-w-[640px] mx-auto px-6 py-8 pb-16">
+      <div className="flex items-center gap-3 mb-8">
         <Btn variant="soft" size="sm" onClick={() => onNav("urge")}>← Back</Btn>
-        <div className="text-xl font-bold" style={{ color: "var(--t1)" }}>Choose your task</div>
+        <div className="text-xl font-semibold text-[#262E36]">Choose your task</div>
       </div>
 
-      <InsightBox icon="✨" label="AI Recommendation" text={aiRec} />
+      <div className="mb-6">
+        <InsightBox icon="✨" label="AI Recommendation" text={aiRec}/>
+      </div>
 
-      <div className="mt-6">
-        <div className="text-xs font-bold uppercase tracking-widest mb-3 flex items-center gap-2" style={{ color: "var(--green-d)" }}>
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--green-d)" }} />
-          Best for {lv === "low" ? "mild" : lv === "mid" ? "moderate" : "intense"} urges
+      <div className="mb-8">
+        <SecLabel text={`Best for ${lv==="low"?"mild":lv==="mid"?"moderate":"intense"} urges`} color="#7ABFA0"/>
+        <div className="flex flex-col gap-2">
+          {rec.map((t,i) => (
+            <TaskRow key={t.id} task={t} selected={selectedId===t.id} topPick={i===0}
+              onSelect={() => setSelectedId(t.id)}/>
+          ))}
         </div>
-        {rec.map((t, i) => (
-          <TaskRow key={t.id} task={t} selected={selected === t.id} onSelect={() => selectTask(t)} topPick={i === 0} />
-        ))}
       </div>
 
-      <div className="mt-6">
-        <div className="text-xs font-bold uppercase tracking-widest mb-3 flex items-center gap-2" style={{ color: "var(--t3)" }}>
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--t3)" }} />
-          Other helpful options
+      <div className="mb-8">
+        <SecLabel text="Other helpful options" color="#959CA3"/>
+        <div className="flex flex-col gap-2">
+          {oth.map(t => (
+            <TaskRow key={t.id} task={t} selected={selectedId===t.id}
+              onSelect={() => setSelectedId(t.id)}/>
+          ))}
         </div>
-        {other.map(t => (
-          <TaskRow key={t.id} task={t} selected={selected === t.id} onSelect={() => selectTask(t)} />
-        ))}
       </div>
 
-      <div className="mt-8">
-        <Btn variant="green" size="lg" full onClick={() => onNav("timer")}>Start task →</Btn>
-      </div>
+      <Btn variant="green" size="lg" full onClick={() => selTask && onStart(selTask)}>Start task →</Btn>
     </div>
   );
 }
 
-// ─── Timer Screen ─────────────────────────────────────────────
-function TimerScreen({ state, setState, onNav, toast, uid }) {
-  const task = state.task || ALL_TASKS[0];
-  const [rem, setRem] = useState(task.dur);
+// ── TIMER SCREEN ──────────────────────────────────────────────────────────────
+function TimerScreen({ task, urgeCtx, onQuit, onDone, onToast }) {
+  const [rem, setRem]       = useState(task.dur);
   const [paused, setPaused] = useState(false);
-  const [phase, setPhase] = useState(BREATHE[0]);
-  const [timerMsg, setTimerMsg] = useState("Every second you hold on, the urge loses power. You're choosing differently — that's real strength.");
-  const totalRef = useRef(task.dur);
-  const remRef = useRef(task.dur);
-  const elapsed = useRef(0);
-  const intRef = useRef(null);
+  const [phase, setPhase]   = useState(BREATHE[0]);
+  const [msg, setMsg]       = useState("Every second you hold on, the urge loses power. You're choosing differently — that's real strength.");
+  const timerRef = useRef(null);
+  const elapsedRef = useRef(0);
+  const total = task.dur;
 
   useEffect(() => {
-    gemini(`You are a compassionate recovery coach. Someone is currently doing a "${task.name}" task to resist a ${state.urgeType} urge at intensity ${state.intensity}/10. Write ONE ultra-short encouraging message (1 sentence, max 15 words) to keep them going. Be warm and specific. Just the message.`)
-      .then(t => { if (t) setTimerMsg(t); });
-
-    if (state.uid && state.currentUrgeLogId) {
-      updateDoc(doc(db, "users", state.uid, "urgelogs", state.currentUrgeLogId), { taskUsed: task.id }).catch(() => {});
+    async function fetchMsg() {
+      if (GEMINI_API_KEY) {
+        const q = `You are a compassionate recovery coach. Someone is doing "${task.name}" to resist a ${urgeCtx.urgeType} urge at intensity ${urgeCtx.intensity}/10. Write ONE ultra-short encouraging message (1 sentence, max 15 words). Be warm and specific. Just the message.`;
+        const t = await gemini(q);
+        if (t) setMsg(t);
+      }
     }
-
-    intRef.current = setInterval(() => {
-      if (paused) return;
-      remRef.current--;
-      elapsed.current++;
-      setRem(remRef.current);
-      const e = elapsed.current;
-      if (task.id === "breathing") setPhase(BREATHE[Math.floor(e / 4) % 4]);
-      else setPhase(ENCOUR[Math.floor(e / 60) % ENCOUR.length]);
-      if (remRef.current <= 0) { clearInterval(intRef.current); finish(); }
+    fetchMsg();
+    timerRef.current = setInterval(() => {
+      if (!paused) {
+        elapsedRef.current++;
+        setRem(r => {
+          if (r <= 1) { clearInterval(timerRef.current); onDone(); return 0; }
+          return r - 1;
+        });
+        const e = elapsedRef.current;
+        setPhase(task.id==="breathing" ? BREATHE[Math.floor(e/4)%4] : ENCOUR[Math.floor(e/60)%ENCOUR.length]);
+      }
     }, 1000);
-
-    return () => clearInterval(intRef.current);
+    return () => clearInterval(timerRef.current);
   }, []);
 
-  function finish() {
-    if (uid) updateDoc(doc(db, "users", uid), { tasksDone: increment(1) }).catch(() => {});
-    setState(s => ({ ...s, tasksDone: s.tasksDone + 1 }));
-    onNav("feedback");
-  }
+  useEffect(() => {
+    if (paused) clearInterval(timerRef.current);
+    else {
+      timerRef.current = setInterval(() => {
+        elapsedRef.current++;
+        setRem(r => {
+          if (r <= 1) { clearInterval(timerRef.current); onDone(); return 0; }
+          return r - 1;
+        });
+        const e = elapsedRef.current;
+        setPhase(task.id==="breathing" ? BREATHE[Math.floor(e/4)%4] : ENCOUR[Math.floor(e/60)%ENCOUR.length]);
+      }, 1000);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [paused]);
 
-  const total = totalRef.current;
-  const dashoffset = 603 * (rem / total);
+  const progress = 603 * (rem / total);
 
   return (
-    <div className="max-w-xl mx-auto px-6 py-8 pb-20 screen-enter">
-      <div className="mb-4">
-        <Btn variant="soft" size="sm" onClick={() => { clearInterval(intRef.current); onNav("task"); }}>✕ Stop task</Btn>
+    <div className="max-w-[640px] mx-auto px-6 py-8">
+      <div className="mb-3">
+        <Btn variant="soft" size="sm" onClick={onQuit}>✕ Stop task</Btn>
       </div>
+      <div className="flex flex-col items-center py-12 pt-6">
+        <div className="text-[22px] font-bold text-[#262E36] text-center mb-1.5">{task.name}</div>
+        <div className="text-sm text-[#5A6A7A] text-center mb-8">Focus. You're doing something powerful right now.</div>
 
-      <div className="flex flex-col items-center">
-        <div className="text-2xl font-bold mb-1 text-center" style={{ color: "var(--t1)" }}>{task.name}</div>
-        <div className="text-sm mb-8 text-center" style={{ color: "var(--t2)" }}>Focus. You're doing something powerful right now.</div>
-
-        <div className="relative mb-8" style={{ width: 220, height: 220 }}>
+        <div className="relative mb-8">
           <svg width="220" height="220" viewBox="0 0 220 220">
-            <circle cx="110" cy="110" r="96" fill="none" stroke="var(--bg3)" strokeWidth="8" />
-            <circle cx="110" cy="110" r="96" fill="none" stroke="var(--blue)" strokeWidth="8"
-              strokeLinecap="round" strokeDasharray="603" strokeDashoffset={dashoffset}
-              style={{ transformOrigin: "center", transform: "rotate(-90deg)", transition: "stroke-dashoffset 1s linear" }} />
+            <circle cx="110" cy="110" r="96" fill="none" stroke="#EEF2F7" strokeWidth="8"/>
+            <circle cx="110" cy="110" r="96" fill="none" stroke="#2486DB" strokeWidth="8"
+              strokeLinecap="round" strokeDasharray="603" strokeDashoffset={progress}
+              style={{transformOrigin:"center",transform:"rotate(-90deg)",transition:"stroke-dashoffset 1s linear"}}/>
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <div className="text-4xl mb-1">{task.icon}</div>
-            <div className="text-3xl font-black tabular-nums" style={{ color: "var(--t1)" }}>{fmt(rem)}</div>
-            <div className="text-sm mt-1 text-center px-4" style={{ color: "var(--t2)" }}>{phase}</div>
+            <div className="text-[48px] font-black text-[#262E36] tracking-tighter leading-none">{fmt(rem)}</div>
+            <div className="text-[13px] text-[#5A6A7A] mt-1 font-medium">{phase}</div>
           </div>
         </div>
 
         <div className="w-full mb-8">
-          <InsightBox icon="💙" label="Stay with it" text={timerMsg} />
+          <InsightBox icon="💙" label="Stay with it" text={msg}/>
         </div>
 
         <div className="flex gap-3 w-full">
-          <Btn variant="soft" size="lg" full onClick={() => setPaused(p => !p)}>
+          <Btn variant="soft" size="lg" className="flex-1" onClick={() => setPaused(p => !p)}>
             {paused ? "▶ Resume" : "⏸ Pause"}
           </Btn>
-          <Btn variant="green" size="lg" full onClick={() => { clearInterval(intRef.current); finish(); }}>✓ Done</Btn>
+          <Btn variant="green" size="lg" className="flex-1" onClick={onDone}>✓ Done</Btn>
         </div>
       </div>
     </div>
   );
 }
 
-// ─── Feedback Screen ──────────────────────────────────────────
-function FeedbackScreen({ state, setState, onNav, toast, uid }) {
+// ── FEEDBACK SCREEN ───────────────────────────────────────────────────────────
+function FeedbackScreen({ task, onGone, onStill }) {
   const [note, setNote] = useState("");
-
-  async function urgeGone() {
-    setState(s => ({ ...s, resisted: s.resisted + 1 }));
-    if (uid) {
-      await updateDoc(doc(db, "users", uid), { resisted: increment(1) }).catch(() => {});
-      if (state.currentUrgeLogId) {
-        await updateDoc(doc(db, "users", uid, "urgelogs", state.currentUrgeLogId), { outcome: "resisted", feedbackNote: note }).catch(() => {});
-      }
-    }
-    setState(s => ({ ...s, currentUrgeLogId: null }));
-    toast("Wonderful — urge resisted! 🎉");
-    onNav("dashboard");
-  }
-
-  function urgeStill() {
-    if (uid && state.currentUrgeLogId) {
-      updateDoc(doc(db, "users", uid, "urgelogs", state.currentUrgeLogId), { outcome: "still_there" }).catch(() => {});
-    }
-    toast("That's okay — let's try a different approach");
-    onNav("task");
-  }
-
   return (
-    <div className="max-w-xl mx-auto px-6 py-16 pb-20 flex flex-col items-center screen-enter">
+    <div className="max-w-[640px] mx-auto px-6 py-8 flex flex-col items-center" style={{paddingTop:"48px"}}>
       <div className="text-5xl mb-4">🎯</div>
-      <div className="text-2xl font-bold text-center mb-3" style={{ color: "var(--t1)" }}>You did it!</div>
-      <p className="text-sm text-center leading-relaxed mb-8" style={{ color: "var(--t2)", maxWidth: "36ch" }}>
-        You completed <strong style={{ color: "var(--t1)" }}>{state.task?.name || "the task"}</strong>. That took real strength. How is the urge feeling now?
+      <div className="text-2xl font-bold text-[#262E36] text-center mb-3">You did it!</div>
+      <p className="text-[15px] text-[#5A6A7A] text-center max-w-xs mb-8 leading-relaxed">
+        You completed <strong className="text-[#262E36]">{task.name}</strong>. That took real strength. How is the urge feeling now?
       </p>
 
-      <div className="grid grid-cols-2 gap-4 w-full max-w-sm mb-8">
+      <div className="grid grid-cols-2 gap-4 w-full max-w-[480px] mb-8 max-sm:grid-cols-1">
         {[
-          { icon: "✅", title: "It's gone", sub: "I feel better now", onClick: urgeGone, border: "var(--green-bd)", bg: "var(--green-bg)", col: "var(--green-d)" },
-          { icon: "😰", title: "Still there", sub: "I need another task", onClick: urgeStill, border: "var(--rose-bd)", bg: "var(--rose-bg)", col: "var(--rose)" },
-        ].map(x => (
-          <button key={x.title} onClick={x.onClick}
-            className="flex flex-col items-center p-6 rounded-3xl cursor-pointer transition-all duration-150 hover:-translate-y-1"
-            style={{ background: x.bg, border: `2px solid ${x.border}`, fontFamily: "inherit" }}>
-            <div className="text-4xl mb-2">{x.icon}</div>
-            <div className="font-bold text-base" style={{ color: x.col }}>{x.title}</div>
-            <div className="text-xs mt-1" style={{ color: "var(--t2)" }}>{x.sub}</div>
+          { cls:"ok",  ico:"✅", title:"It's gone",     sub:"I feel better now",    fn:()=>onGone(note) },
+          { cls:"bad", ico:"😰", title:"Still there",   sub:"I need another task",  fn:onStill },
+        ].map(o => (
+          <button key={o.cls} onClick={o.fn}
+            className={`bg-white border-[1.5px] border-[rgba(36,134,219,.12)] rounded-2xl p-6 text-center cursor-pointer transition-all duration-250 shadow-[0_1px_4px_rgba(36,134,219,.08)]
+              hover:-translate-y-[3px] hover:shadow-[0_8px_32px_rgba(36,134,219,.16)]
+              ${o.cls==="ok" ? "hover:border-[rgba(168,213,186,.4)] hover:bg-[rgba(168,213,186,.15)]" : "hover:border-[rgba(229,115,115,.28)] hover:bg-[rgba(229,115,115,.12)]"}`}>
+            <div className="text-4xl mb-2.5">{o.ico}</div>
+            <div className="text-base font-bold text-[#262E36] mb-1">{o.title}</div>
+            <div className="text-[13px] text-[#5A6A7A]">{o.sub}</div>
           </button>
         ))}
       </div>
 
-      <div className="w-full max-w-sm">
-        <label className="text-xs font-bold uppercase tracking-widest block mb-2" style={{ color: "var(--t3)" }}>
-          Quick note <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>(optional)</span>
-        </label>
-        <textarea className="w-full p-4 rounded-2xl text-sm resize-none outline-none"
-          style={{ background: "var(--bg3)", border: "1.5px solid var(--brd)", color: "var(--t1)", fontFamily: "inherit", lineHeight: 1.6, minHeight: 80 }}
+      <div className="w-full max-w-[480px]">
+        <label className="block text-sm font-semibold text-[#262E36] mb-1.5">Quick note <span className="text-[#959CA3] font-normal">(optional)</span></label>
+        <textarea value={note} onChange={e=>setNote(e.target.value)}
           placeholder="What helped? Any insight about this experience..."
-          value={note} onChange={e => setNote(e.target.value)} />
+          className="w-full bg-white border border-[rgba(36,134,219,.22)] rounded-xl px-4 py-3 text-[15px] text-[#262E36] outline-none resize-y min-h-[88px] leading-relaxed placeholder:text-[#959CA3] focus:border-[#2486DB] focus:shadow-[0_0_0_3px_rgba(36,134,219,.1)]"/>
       </div>
     </div>
   );
 }
 
-// ─── Analytics Screen ─────────────────────────────────────────
-function AnalyticsScreen({ state, onNav, toast, uid }) {
-  const { streak, best, resisted, urgesTotal } = state;
-  const [aiInsight, setAiInsight] = useState("Your urges peak on Wednesday evenings — likely midweek stress. Your most effective tool has been Breathing (82% success). Try sleeping 30 min earlier on weekdays to cut your late-night vulnerability window.");
-  const [barData, setBarData] = useState([0,0,0,0,0,0,0]);
-  const [trigData, setTrigData] = useState([
-    { n: "Stress", p: 0, c: "var(--rose)" }, { n: "Boredom", p: 0, c: "#B07D00" },
-    { n: "Lonely", p: 0, c: "var(--blue)" }, { n: "Anxiety", p: 0, c: "var(--green-d)" },
-    { n: "Habit",  p: 0, c: "var(--t3)" },
-  ]);
-  const [relapses, setRelapses] = useState(0);
+// ── ANALYTICS SCREEN ──────────────────────────────────────────────────────────
+function AnalyticsScreen({ S, urgelogs, onToast, onRelapse }) {
+  const [insight, setInsight] = useState("Add your Gemini API key to unlock personalised AI insights based on your real data.");
+  const [relapseModal, setRelapseModal] = useState(false);
+
+  // Process urgelogs
+  const last7 = new Date(); last7.setDate(last7.getDate()-7);
+  const logs7  = urgelogs.filter(l => l.date >= last7);
+
+  const barData = Array(7).fill(0);
+  const trigCounts = {Stress:0,Boredom:0,Lonely:0,Anxiety:0,Habit:0,Other:0};
+  let relapseCount = 0;
+
+  logs7.forEach(l => {
+    const dayIdx = Math.min(6, Math.floor((Date.now()-l.date.getTime())/86400000));
+    barData[6-dayIdx]++;
+    const trig=(l.trigger||"").toLowerCase();
+    if(trig.includes("stress"))   trigCounts.Stress++;
+    else if(trig.includes("boredom")) trigCounts.Boredom++;
+    else if(trig.includes("lone"))    trigCounts.Lonely++;
+    else if(trig.includes("anx"))     trigCounts.Anxiety++;
+    else if(trig.includes("habit"))   trigCounts.Habit++;
+    else                              trigCounts.Other++;
+    if(l.outcome==="relapsed") relapseCount++;
+  });
+
+  const totalTrigs = Math.max(Object.values(trigCounts).reduce((a,b)=>a+b,0),1);
+  const trigData = [
+    {n:"Stress",  p:Math.round(trigCounts.Stress/totalTrigs*100),  c:"#E57373"},
+    {n:"Boredom", p:Math.round(trigCounts.Boredom/totalTrigs*100), c:"#B07D00"},
+    {n:"Lonely",  p:Math.round(trigCounts.Lonely/totalTrigs*100),  c:"#2486DB"},
+    {n:"Anxiety", p:Math.round(trigCounts.Anxiety/totalTrigs*100), c:"#7ABFA0"},
+    {n:"Habit",   p:Math.round(trigCounts.Habit/totalTrigs*100),   c:"#959CA3"},
+  ];
+  const effData = [
+    {n:"Breathing",  i:"🫁",p:82},{n:"Exercise",i:"🏃",p:76},
+    {n:"Cold shower",i:"🚿",p:71},{n:"Journaling",i:"📝",p:65},{n:"Research",i:"📖",p:58}
+  ];
+  const max = Math.max(...barData,1);
 
   useEffect(() => {
-    if (!uid) return;
-    const since = new Date(); since.setDate(since.getDate() - 7); since.setHours(0,0,0,0);
-    getDocs(query(collection(db, "users", uid, "urgelogs"),
-      where("timestamp", ">=", Timestamp.fromDate(since)), orderBy("timestamp", "asc")))
-      .then(snap => {
-        const bars = [0,0,0,0,0,0,0];
-        const tc = { Stress:0, Boredom:0, Lonely:0, Anxiety:0, Habit:0, Other:0 };
-        let rel = 0;
-        snap.forEach(d => {
-          const da = d.data();
-          const date = da.timestamp?.toDate(); if (!date) return;
-          const idx = Math.min(6, Math.floor((Date.now() - date.getTime()) / 86400000));
-          bars[6 - idx]++;
-          const t = (da.trigger || "").toLowerCase();
-          if (t.includes("stress")) tc.Stress++;
-          else if (t.includes("boredom")) tc.Boredom++;
-          else if (t.includes("lone")) tc.Lonely++;
-          else if (t.includes("anx")) tc.Anxiety++;
-          else if (t.includes("habit")) tc.Habit++;
-          else tc.Other++;
-          if (da.outcome === "relapsed") rel++;
-        });
-        setBarData(bars);
-        setRelapses(rel);
-        const total = Math.max(Object.values(tc).reduce((a,b)=>a+b,0), 1);
-        const td = [
-          { n:"Stress", p:Math.round(tc.Stress/total*100), c:"var(--rose)" },
-          { n:"Boredom",p:Math.round(tc.Boredom/total*100),c:"#B07D00" },
-          { n:"Lonely", p:Math.round(tc.Lonely/total*100), c:"var(--blue)" },
-          { n:"Anxiety",p:Math.round(tc.Anxiety/total*100),c:"var(--green-d)" },
-          { n:"Habit",  p:Math.round(tc.Habit/total*100),  c:"var(--t3)" },
-        ];
-        setTrigData(td);
-        const effData = [
-          { n:"Breathing",i:"🫁",p:82},{n:"Exercise",i:"🏃",p:76},
-          { n:"Cold shower",i:"🚿",p:71},{n:"Journaling",i:"📝",p:65},
-          { n:"Research",i:"📖",p:58}
-        ];
-        gemini(`You are a recovery analytics coach. User stats: streak=${streak} days, urges resisted=${resisted}, total urges=${urgesTotal}. Top triggers: ${td.map(t=>`${t.n}:${t.p}%`).join(", ")}. Task effectiveness: ${effData.map(e=>`${e.n}:${e.p}%success`).join(", ")}. Write a personalised, actionable 2-sentence insight and one specific recommendation. Be warm and data-driven. No preamble.`)
-          .then(t => { if (t) setAiInsight(t); });
-      }).catch(() => {});
-  }, [uid]);
-
-  const days = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
-  const maxBar = Math.max(...barData, 1);
-
-  const effData = [
-    { n:"Breathing",i:"🫁",p:82},{n:"Exercise",i:"🏃",p:76},
-    { n:"Cold shower",i:"🚿",p:71},{n:"Journaling",i:"📝",p:65},
-    { n:"Research",i:"📖",p:58}
-  ];
+    async function fetchInsight() {
+      if (GEMINI_API_KEY) {
+        const tStr = trigData.map(t=>`${t.n}:${t.p}%`).join(", ");
+        const eStr = effData.map(e=>`${e.n}:${e.p}%`).join(", ");
+        const q = `You are a recovery analytics coach. streak=${S.streak} days, urges resisted=${S.resisted}, total=${S.urgesTotal}. Top triggers: ${tStr}. Task effectiveness: ${eStr}. Write a personalised, actionable 2-sentence insight and one specific recommendation. Be warm and data-driven. No preamble.`;
+        const t = await gemini(q);
+        if (t) setInsight(t);
+      }
+    }
+    fetchInsight();
+  }, []);
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8 pb-20 screen-enter">
+    <div className="max-w-[960px] mx-auto px-6 py-8 pb-16">
       <div className="mb-6">
-        <div className="text-2xl font-bold mb-1" style={{ color: "var(--t1)" }}>Your Progress</div>
-        <p className="text-sm" style={{ color: "var(--t2)" }}>A clear picture of your recovery journey over time.</p>
+        <div className="text-2xl font-bold text-[#262E36] mb-2">Your Progress</div>
+        <p className="text-sm text-[#5A6A7A]">A clear picture of your recovery journey over time.</p>
       </div>
 
-      <div className="mb-6">
-        <InsightBox icon="🧠" label="Weekly AI Insight" text={aiInsight} />
+      <div className="mb-8">
+        <InsightBox icon="🧠" label="Weekly AI Insight" text={insight}/>
       </div>
 
       {/* Stats grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 gap-4 mb-8 max-sm:grid-cols-1">
         {[
-          { num: streak, lbl: "Current streak", color: "var(--green-d)", delta: "↑ Building momentum", up: true },
-          { num: best, lbl: "Best streak ever", color: "var(--t1)", delta: "Personal record", up: null },
-          { num: resisted, lbl: "Urges resisted", color: "var(--blue)", delta: urgesTotal ? `↑ ${Math.round(resisted/urgesTotal*100)}% success rate` : "—", up: true },
-          { num: relapses, lbl: "Relapses this month", color: "var(--rose)", delta: "Logged this week", up: false },
-        ].map(s => (
-          <Card key={s.lbl}>
-            <div className="p-5">
-              <div className="text-4xl font-black mb-1" style={{ color: s.color }}>{s.num}</div>
-              <div className="text-xs font-semibold mb-2" style={{ color: "var(--t2)" }}>{s.lbl}</div>
-              <div className="text-xs font-medium" style={{ color: s.up === true ? "var(--green-d)" : s.up === false ? "var(--rose)" : "var(--t3)" }}>{s.delta}</div>
-            </div>
-          </Card>
+          {val:S.streak, label:"Current streak",      delta:"↑ Personal record",          delta2:"up",  color:"#7ABFA0"},
+          {val:S.best,   label:"Best streak ever",     delta:"Personal record",            delta2:"mid", color:"#262E36"},
+          {val:S.resisted,label:"Urges resisted",      delta:`↑ ${S.urgesTotal?Math.round(S.resisted/S.urgesTotal*100):0}% success rate`, delta2:"up", color:"#2486DB"},
+          {val:relapseCount,label:"Relapses this week",delta:"↓ See trends below",        delta2:"dn",  color:"#E57373"},
+        ].map((s,i) => (
+          <div key={i} className="bg-white border border-[rgba(36,134,219,.12)] rounded-2xl p-6 shadow-[0_1px_4px_rgba(36,134,219,.08)]">
+            <div className="text-[40px] font-black tracking-tight leading-none mb-1" style={{color:s.color}}>{s.val}</div>
+            <div className="text-sm text-[#5A6A7A] mb-1.5">{s.label}</div>
+            <div className={`text-[13px] font-semibold ${s.delta2==="up"?"text-[#7ABFA0]":s.delta2==="dn"?"text-[#E57373]":"text-[#959CA3]"}`}>{s.delta}</div>
+          </div>
         ))}
       </div>
 
       {/* Bar chart */}
-      <div className="mb-6">
-        <Card>
-          <CardHeader title="Urge frequency" subtitle="Urges logged each day this week" />
-          <div className="p-5">
-            <div className="flex items-end gap-2 h-32">
-              {barData.map((v, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                  <span className="text-xs font-bold" style={{ color: "var(--t2)" }}>{v || ""}</span>
-                  <div className="w-full rounded-t-lg transition-all duration-500"
-                    style={{ height: Math.max((v / maxBar) * 100, v > 0 ? 4 : 0), background: v === Math.max(...barData) && v > 0 ? "var(--rose)" : "var(--blue)", minHeight: 0 }} />
-                  <span className="text-xs font-medium" style={{ color: "var(--t3)" }}>{days[i]}</span>
-                </div>
-              ))}
-            </div>
+      <div className="mb-8 bg-white border border-[rgba(36,134,219,.12)] rounded-2xl shadow-[0_1px_4px_rgba(36,134,219,.08)] overflow-hidden">
+        <div className="px-6 py-4 border-b border-[rgba(36,134,219,.12)]">
+          <div className="text-base font-bold text-[#262E36]">Urge frequency</div>
+          <div className="text-[13px] text-[#5A6A7A] mt-0.5">Urges logged each day this week</div>
+        </div>
+        <div className="p-6">
+          <div className="flex items-end gap-2.5 h-[130px] pt-2">
+            {barData.map((v,i) => (
+              <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
+                <span className="text-[12px] font-semibold text-[#5A6A7A]">{v||""}</span>
+                <div className="w-full rounded-t-[6px] min-h-1 transition-all duration-700"
+                  style={{height:`${Math.round((v/max)*100)}px`, background:v===Math.max(...barData)&&v>0?"#E57373":"#2486DB"}}/>
+                <span className="text-[11px] text-[#959CA3] font-medium">{DAYS_OF_WEEK[i]}</span>
+              </div>
+            ))}
           </div>
-        </Card>
+        </div>
       </div>
 
-      {/* Triggers + effectiveness */}
-      <div className="grid md:grid-cols-2 gap-4 mb-6">
-        <Card>
-          <CardHeader title="Top triggers" />
-          <div className="p-5 space-y-3">
+      {/* Triggers + Effectiveness */}
+      <div className="grid grid-cols-2 gap-4 mb-8 max-sm:grid-cols-1">
+        <div className="bg-white border border-[rgba(36,134,219,.12)] rounded-2xl shadow-[0_1px_4px_rgba(36,134,219,.08)] overflow-hidden">
+          <div className="px-6 py-4 border-b border-[rgba(36,134,219,.12)] text-base font-bold text-[#262E36]">Top triggers</div>
+          <div className="p-6">
             {trigData.map(t => (
-              <div key={t.n} className="flex items-center gap-3">
-                <div className="w-16 text-xs font-semibold" style={{ color: "var(--t2)" }}>{t.n}</div>
-                <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: "var(--bg4)" }}>
-                  <div className="h-full rounded-full transition-all duration-700" style={{ width: `${t.p}%`, background: t.c }} />
+              <div key={t.n} className="flex items-center gap-2.5 mb-2.5">
+                <span className="text-[13px] text-[#5A6A7A] w-[76px] shrink-0 font-medium">{t.n}</span>
+                <div className="flex-1 h-2 bg-[#EEF2F7] rounded overflow-hidden">
+                  <div className="h-full rounded transition-all duration-700" style={{width:`${t.p}%`,background:t.c}}/>
                 </div>
-                <div className="w-8 text-xs font-bold text-right" style={{ color: "var(--t2)" }}>{t.p}%</div>
+                <span className="text-[12px] font-bold text-[#5A6A7A] w-8 text-right shrink-0">{t.p}%</span>
               </div>
             ))}
           </div>
-        </Card>
-
-        <Card>
-          <CardHeader title="Task effectiveness" />
-          <div className="p-5 space-y-3">
+        </div>
+        <div className="bg-white border border-[rgba(36,134,219,.12)] rounded-2xl shadow-[0_1px_4px_rgba(36,134,219,.08)] overflow-hidden">
+          <div className="px-6 py-4 border-b border-[rgba(36,134,219,.12)] text-base font-bold text-[#262E36]">Task effectiveness</div>
+          <div className="p-6">
             {effData.map(e => (
-              <div key={e.n} className="flex items-center gap-3">
-                <span className="text-base">{e.i}</span>
+              <div key={e.n} className="flex items-center gap-2.5 mb-3">
+                <div className="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-[.9rem] bg-[#EEF2F7] shrink-0">{e.i}</div>
                 <div className="flex-1">
-                  <div className="text-xs font-semibold mb-1" style={{ color: "var(--t1)" }}>{e.n}</div>
-                  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--bg4)" }}>
-                    <div className="h-full rounded-full" style={{ width: `${e.p}%`, background: "var(--blue)" }} />
+                  <div className="text-[13px] font-semibold text-[#262E36] mb-1">{e.n}</div>
+                  <div className="h-1.5 bg-[#EEF2F7] rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-[#2486DB] transition-all duration-700" style={{width:`${e.p}%`}}/>
                   </div>
                 </div>
-                <div className="w-8 text-xs font-bold text-right" style={{ color: "var(--blue)" }}>{e.p}%</div>
+                <span className="text-[13px] font-bold text-[#5A6A7A] w-8 text-right shrink-0">{e.p}%</span>
               </div>
             ))}
           </div>
-        </Card>
+        </div>
       </div>
 
       {/* 14-day calendar */}
-      <div className="mb-6">
-        <Card>
-          <CardHeader title="Last 14 days" subtitle="Green = resisted · Red = relapsed" />
-          <div className="p-5">
-            <CalendarStrip uid={uid} days={14} />
-          </div>
-        </Card>
+      <div className="mb-8 bg-white border border-[rgba(36,134,219,.12)] rounded-2xl shadow-[0_1px_4px_rgba(36,134,219,.08)] overflow-hidden">
+        <div className="px-6 py-4 border-b border-[rgba(36,134,219,.12)]">
+          <div className="text-base font-bold text-[#262E36]">Last 14 days</div>
+          <div className="text-[13px] text-[#5A6A7A] mt-0.5">Green = resisted · Red = relapsed</div>
+        </div>
+        <div className="p-6"><CalStrip logs={urgelogs} days={14}/></div>
       </div>
 
-      {/* Relapse CTA */}
-      <Card style={{ borderColor: "var(--rose-bd)" }}>
-        <div className="p-5 flex items-center justify-between gap-4">
+      {/* Relapse card */}
+      <div className="bg-white border-[1.5px] border-[rgba(229,115,115,.28)] rounded-2xl p-6">
+        <div className="flex items-center justify-between">
           <div>
-            <div className="font-bold mb-1" style={{ color: "var(--rose)", fontSize: 15 }}>Had a relapse?</div>
-            <p className="text-xs leading-relaxed" style={{ color: "var(--t2)" }}>Logging it resets your streak, but your personal best stays. It helps the AI build a better plan for you.</p>
+            <div className="font-bold text-[#E57373] text-[15px] mb-2">Had a relapse?</div>
+            <p className="text-sm text-[#5A6A7A]">Logging it resets your streak, but your personal best stays. It helps the AI build a better plan for you.</p>
           </div>
-          <Btn variant="danger" size="md" style={{ flexShrink: 0 }} onClick={() => onNav("relapse-modal")}>Log relapse</Btn>
+          <Btn variant="danger" size="md" className="shrink-0 ml-6" onClick={() => setRelapseModal(true)}>Log relapse</Btn>
         </div>
-      </Card>
+      </div>
+
+      <Modal open={relapseModal} onClose={() => setRelapseModal(false)}
+        title="Log a relapse"
+        body="It takes courage to acknowledge this. Your streak resets to zero, but your personal best stays. The AI uses this to build a better plan — you're not starting over, you're learning."
+        actions={<>
+          <Btn variant="soft" size="md" className="flex-1" onClick={() => setRelapseModal(false)}>Not yet</Btn>
+          <Btn variant="danger" size="md" className="flex-1" onClick={() => { setRelapseModal(false); onRelapse(); }}>Yes, log it</Btn>
+        </>}/>
     </div>
   );
 }
 
-// ─── Profile Screen ───────────────────────────────────────────
-function ProfileScreen({ state, setState, onNav, toast, user, theme, setTheme }) {
-  const { streak, resisted, urgesTotal, userName, addictions } = state;
-  const ADDICTION_LABELS = { porn: "🔞 Pornography", smoking: "🚬 Smoking", alcohol: "🍺 Alcohol", screen: "📱 Screen" };
-
-  const [darkMode, setDarkMode] = useState(theme === "dark");
-
-  function toggleDark(v) {
-    setDarkMode(v);
-    setTheme(v ? "dark" : "light");
-  }
+// ── PROFILE SCREEN ────────────────────────────────────────────────────────────
+function ProfileScreen({ S, dark, onToggleDark, onLogout, onToast }) {
+  const [resetModal, setResetModal] = useState(false);
+  const labelMap = { porn:"🔞 Pornography", smoking:"🚬 Smoking", alcohol:"🍺 Alcohol", screen:"📱 Screen" };
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8 pb-20 screen-enter">
-      <div className="text-2xl font-bold mb-8" style={{ color: "var(--t1)" }}>Profile & Settings</div>
+    <div className="max-w-[960px] mx-auto px-6 py-8 pb-16">
+      <div className="text-2xl font-bold text-[#262E36] mb-8">Profile & Settings</div>
 
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Left: profile card */}
-        <div className="space-y-4">
-          <Card>
-            <div className="p-6 flex flex-col items-center text-center">
-              <div className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-4"
-                style={{ background: "linear-gradient(135deg,var(--blue),var(--teal))", boxShadow: "0 4px 20px var(--blue-glow)" }}>
-                🌿
+      <div className="grid grid-cols-[260px_1fr] gap-6 max-sm:grid-cols-1">
+        {/* Left column */}
+        <div>
+          <div className="bg-white border border-[rgba(36,134,219,.12)] rounded-2xl p-6 text-center shadow-[0_1px_4px_rgba(36,134,219,.08)] mb-4">
+            <div className="w-[72px] h-[72px] rounded-full mx-auto mb-4 bg-gradient-to-br from-[#2486DB] to-[#4ECDC4] flex items-center justify-center text-[2rem] shadow-[0_4px_16px_rgba(36,134,219,.2)]">🌿</div>
+            <div className="text-xl font-bold text-[#262E36] mb-0.5">{S.userName}</div>
+            <div className="text-[13px] text-[#5A6A7A] mt-1 mb-3">{S.email}</div>
+            <Badge variant="green">🔥 {S.streak} day streak</Badge>
+            <div className="grid grid-cols-2 gap-2 mt-4">
+              <div className="bg-[#EEF2F7] rounded-xl p-3 text-center">
+                <div className="text-[24px] font-black text-[#2486DB]">{S.resisted}</div>
+                <div className="text-[12px] text-[#5A6A7A] mt-0.5">Resisted</div>
               </div>
-              <div className="text-xl font-bold mb-1" style={{ color: "var(--t1)" }}>{userName}</div>
-              <div className="text-sm mb-3" style={{ color: "var(--t2)" }}>{user?.email || ""}</div>
-              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-bold"
-                style={{ background: "var(--green-bg)", border: "1px solid var(--green-bd)", color: "var(--green-d)" }}>
-                🔥 {streak} day streak
+              <div className="bg-[#EEF2F7] rounded-xl p-3 text-center">
+                <div className="text-[24px] font-black text-[#5A6A7A]">{S.urgesTotal}</div>
+                <div className="text-[12px] text-[#5A6A7A] mt-0.5">Total urges</div>
               </div>
-              <div className="grid grid-cols-2 gap-4 mt-5 w-full">
-                {[{ v: resisted, k: "Resisted" }, { v: urgesTotal, k: "Total urges", muted: true }].map(x => (
-                  <div key={x.k} className="text-center">
-                    <div className="text-2xl font-black" style={{ color: x.muted ? "var(--t2)" : "var(--t1)" }}>{x.v}</div>
-                    <div className="text-xs font-semibold mt-0.5" style={{ color: "var(--t3)" }}>{x.k}</div>
+            </div>
+          </div>
+          <div className="bg-white border border-[rgba(36,134,219,.12)] rounded-2xl p-6 shadow-[0_1px_4px_rgba(36,134,219,.08)]">
+            <div className="text-sm font-semibold text-[#262E36] mb-3">Tracking</div>
+            <div className="flex flex-wrap gap-2">
+              {S.addictions.length
+                ? S.addictions.map(a => (
+                    <span key={a} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border-[1.5px] text-sm font-medium bg-[rgba(168,213,186,.15)] border-[rgba(168,213,186,.4)] text-[#7ABFA0]">
+                      {labelMap[a]||a}
+                    </span>
+                  ))
+                : <span className="text-sm text-[#959CA3]">Complete onboarding to see this</span>}
+            </div>
+          </div>
+        </div>
+
+        {/* Settings */}
+        <div>
+          <div className="bg-white border border-[rgba(36,134,219,.12)] rounded-2xl shadow-[0_1px_4px_rgba(36,134,219,.08)] overflow-hidden">
+            {[
+              { group:"Appearance", rows:[
+                { icon:"🌙", iconBg:"rgba(36,134,219,.1)", name:"Dark mode", desc:"Switch between light and dark themes",
+                  action:<Toggle checked={dark} onChange={e=>onToggleDark()}/> },
+              ]},
+              { group:"Notifications", rows:[
+                { icon:"🔔", iconBg:"rgba(247,200,115,.18)", name:"Daily check-in reminder", desc:"A gentle nudge at noon every day", action:<Toggle checked={true} onChange={()=>{}}/> },
+                { icon:"📊", iconBg:"rgba(168,213,186,.15)", name:"Weekly AI report", desc:"Insights every Sunday morning", action:<Toggle checked={true} onChange={()=>{}}/> },
+              ]},
+              { group:"AI", rows:[
+                { icon:"✨", iconBg:"rgba(36,134,219,.1)", name:"AI encouragement during tasks", desc:"Gemini-powered support while you focus", action:<Toggle checked={true} onChange={()=>{}}/> },
+                { icon:"🔑", iconBg:"rgba(36,134,219,.1)", name:"Gemini API key", desc:"Connect your own key for AI features", action:<Btn variant="ghost" size="sm" onClick={()=>onToast("Configure via Vite env vars")}>Configure</Btn> },
+              ]},
+              { group:"Data & Privacy", rows:[
+                { icon:"📤", iconBg:"rgba(36,134,219,.1)", name:"Export my data", desc:"Download everything as a file", action:<Btn variant="soft" size="sm" onClick={()=>onToast("Export coming soon!")}>Export</Btn> },
+                { icon:"🗑️", iconBg:"rgba(229,115,115,.12)", name:"Reset all data", desc:"This cannot be undone",
+                  action:<Btn variant="soft" size="sm" className="!text-[#E57373]" onClick={()=>setResetModal(true)}>Reset</Btn> },
+              ]},
+            ].map(g => (
+              <div key={g.group}>
+                <div className="px-6 py-2.5 text-[12px] font-bold tracking-[.05em] uppercase text-[#959CA3] bg-[#EEF2F7] border-b border-[rgba(36,134,219,.12)]">{g.group}</div>
+                {g.rows.map(r => (
+                  <div key={r.name} className="flex items-center gap-4 px-6 py-4 border-b border-[rgba(36,134,219,.12)] last:border-b-0">
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0" style={{background:r.iconBg}}>{r.icon}</div>
+                    <div className="flex-1">
+                      <div className="text-[15px] font-medium text-[#262E36]">{r.name}</div>
+                      <div className="text-[13px] text-[#5A6A7A] mt-0.5">{r.desc}</div>
+                    </div>
+                    {r.action}
                   </div>
                 ))}
               </div>
-            </div>
-          </Card>
-
-          <Card>
-            <div className="p-5">
-              <div className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--t3)" }}>Tracking</div>
-              <div className="flex flex-wrap gap-2">
-                {addictions.length
-                  ? addictions.map(a => (
-                      <span key={a} className="px-3 py-1 rounded-full text-xs font-bold"
-                        style={{ background: "var(--green-bg)", border: "1px solid var(--green-bd)", color: "var(--green-d)" }}>
-                        {ADDICTION_LABELS[a] || a}
-                      </span>
-                    ))
-                  : <span className="text-sm" style={{ color: "var(--t2)" }}>Complete onboarding to see this</span>
-                }
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        {/* Right: settings */}
-        <div className="space-y-4">
-          <Card>
-            <div className="p-5">
-              {[
-                {
-                  group: "Appearance",
-                  items: [
-                    { icon: "🌙", bg: "var(--blue-bg)", name: "Dark mode", desc: "Switch between light and dark themes",
-                      right: <Toggle checked={darkMode} onChange={e => toggleDark(e.target.checked)} /> }
-                  ]
-                },
-                {
-                  group: "Notifications",
-                  items: [
-                    { icon: "🔔", bg: "var(--amber-bg)", name: "Daily check-in reminder", desc: "A gentle nudge at noon every day", right: <Toggle checked={true} onChange={() => {}} /> },
-                    { icon: "📊", bg: "var(--green-bg)", name: "Weekly AI report", desc: "Insights every Sunday morning", right: <Toggle checked={true} onChange={() => {}} /> }
-                  ]
-                },
-                {
-                  group: "AI",
-                  items: [
-                    { icon: "✨", bg: "var(--blue-bg)", name: "AI encouragement during tasks", desc: "Gemini-powered support while you focus", right: <Toggle checked={true} onChange={() => {}} /> },
-                    { icon: "🔑", bg: "var(--blue-bg)", name: "Gemini API key", desc: "Connect your own key for AI features",
-                      right: <Btn variant="ghost" size="sm" onClick={() => toast("Configure in .env file: VITE_GEMINI_API_KEY")}>Configure</Btn> }
-                  ]
-                },
-                {
-                  group: "Data & Privacy",
-                  items: [
-                    { icon: "📤", bg: "var(--blue-bg)", name: "Export my data", desc: "Download everything as a file",
-                      right: <Btn variant="soft" size="sm" onClick={() => toast("Export coming soon!")}>Export</Btn> },
-                    { icon: "🗑️", bg: "var(--rose-bg)", name: "Reset all data", desc: "This cannot be undone",
-                      right: <Btn variant="soft" size="sm" style={{ color: "var(--rose)" }} onClick={() => onNav("reset-modal")}>Reset</Btn> }
-                  ]
-                },
-              ].map(section => (
-                <div key={section.group}>
-                  <div className="text-xs font-bold uppercase tracking-widest py-3" style={{ color: "var(--t3)", borderTop: "1px solid var(--brd)" }}>{section.group}</div>
-                  {section.items.map(item => (
-                    <div key={item.name} className="flex items-center gap-3 py-3" style={{ borderBottom: "1px solid var(--brd)" }}>
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0" style={{ background: item.bg }}>{item.icon}</div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-semibold" style={{ color: "var(--t1)" }}>{item.name}</div>
-                        <div className="text-xs mt-0.5" style={{ color: "var(--t2)" }}>{item.desc}</div>
-                      </div>
-                      {item.right}
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Btn variant="soft" size="md" full
-            style={{ color: "var(--rose)", borderColor: "var(--rose-bd)" }}
-            onClick={async () => { await signOut(auth); toast("You've been logged out."); }}>
-            Sign out
-          </Btn>
-          <p className="text-xs text-center" style={{ color: "var(--t3)" }}>Clarity v1.0 · Firebase + Gemini integrated</p>
+            ))}
+          </div>
+          <Btn variant="soft" size="md" full className="mt-4 !text-[#E57373] !border-[rgba(229,115,115,.28)]" onClick={onLogout}>Sign out</Btn>
+          <p className="text-sm text-[#959CA3] text-center mt-4">Clarity v1.0 · Firebase + Gemini integrated</p>
         </div>
       </div>
+
+      <Modal open={resetModal} onClose={() => setResetModal(false)}
+        title="Reset all data?"
+        body="This will permanently remove all your streaks, urge logs, and settings. You can try again tomorrow — but this action cannot be undone."
+        actions={<>
+          <Btn variant="soft" size="md" className="flex-1" onClick={() => setResetModal(false)}>Keep my data</Btn>
+          <Btn variant="danger" size="md" className="flex-1" onClick={() => { setResetModal(false); onToast("Full reset coming with Firebase"); }}>Reset everything</Btn>
+        </>}/>
     </div>
   );
 }
 
-// ─── Main App ──────────────────────────────────────────────────
+// ── ROOT APP ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const [theme, setTheme] = useState(() => {
-    const saved = localStorage.getItem("clarity-theme");
-    return saved || (window.matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light");
-  });
-  const [screen, setScreen] = useState("loading");
-  const [user, setUser]     = useState(null);
+  const [screen, setScreen]   = useState("loading");
+  const [dark, setDark]       = useState(false);
+  const [toast, setToastMsg]  = useState("");
   const [loadMsg, setLoadMsg] = useState("Loading your journey...");
-  const [toast, setToast]   = useState({ msg: "", visible: false });
+
+  // User state
+  const [S, setS] = useState({
+    uid: null, userName: "Champion", email: "", addictions: [],
+    streak: 0, best: 0, urgesTotal: 0, resisted: 0, tasksDone: 0,
+    lastRelapseDate: null,
+  });
+
+  // Flow state
+  const [urgeCtx, setUrgeCtx]     = useState({ urgeType:null, intensity:5, trigger:null, otherText:"" });
+  const [currentTask, setCurrentTask] = useState(ALL_TASKS[0]);
+  const [customTypes, setCustomTypes] = useState([]);
+  const [urgelogs, setUrgelogs]   = useState([]);
+  const [currentLogId, setCurrentLogId] = useState(null);
+  const prevScreen = useRef(null);
   const toastTimer = useRef(null);
 
-  const [state, setState] = useState({
-    uid: null, userName: "Champion",
-    addictions: [], streak: 0, best: 0,
-    urgesTotal: 0, resisted: 0, tasksDone: 0,
-    lastRelapseDate: null,
-    urgeType: null, trigger: null, intensity: 5,
-    task: ALL_TASKS[0],
-    currentUrgeLogId: null,
-  });
+  // Inject global CSS
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.textContent = GLOBAL_CSS;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
 
   // Theme
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("clarity-theme", theme);
-    document.body.style.background = "var(--bg)";
-    document.body.style.color = "var(--t1)";
-    document.body.style.fontFamily = "'Commissioner', sans-serif";
-  }, [theme]);
+    const saved = localStorage.getItem("clarity-theme");
+    const prefersDark = window.matchMedia("(prefers-color-scheme:dark)").matches;
+    const isDark = saved ? saved==="dark" : prefersDark;
+    setDark(isDark);
+  }, []);
 
   function showToast(msg) {
+    setToastMsg(msg);
     clearTimeout(toastTimer.current);
-    setToast({ msg, visible: true });
-    toastTimer.current = setTimeout(() => setToast(t => ({ ...t, visible: false })), 2800);
+    toastTimer.current = setTimeout(() => setToastMsg(""), 2800);
+  }
+
+  function toggleDark() {
+    const next = !dark;
+    setDark(next);
+    localStorage.setItem("clarity-theme", next?"dark":"light");
+    if (S.uid) saveUser(S.uid, { theme: next?"dark":"light" }).catch(()=>{});
+  }
+
+  function go(id) {
+    prevScreen.current = screen;
+    setScreen(id);
+    window.scrollTo(0,0);
   }
 
   // Auth listener
   useEffect(() => {
-    return onAuthStateChanged(auth, async u => {
-      if (u) {
-        setUser(u);
-        setState(s => ({ ...s, uid: u.uid }));
+    const unsub = onAuthStateChanged(auth, async user => {
+      if (user) {
         setLoadMsg("Loading your data...");
         try {
-          const snap = await getDoc(doc(db, "users", u.uid));
+          const snap = await getDoc(doc(db, "users", user.uid));
           if (!snap.exists()) {
-            setState(s => ({ ...s, userName: u.displayName || "Champion" }));
+            setS(s=>({...s,uid:user.uid,userName:user.displayName||"Champion",email:user.email}));
             setScreen("onboarding");
-          } else {
-            const d = snap.data();
-            let streak = d.streak || 0;
-            let lastRelapseDate = null;
-            if (d.lastRelapseDate) {
-              lastRelapseDate = d.lastRelapseDate.toDate();
-              streak = Math.max(Math.floor((Date.now() - lastRelapseDate.getTime()) / 86400000), 0);
-            }
-            setState(s => ({
-              ...s, uid: u.uid,
-              userName: d.name || u.displayName || "Champion",
-              addictions: d.addictions || [],
-              streak, best: d.bestStreak || 0,
-              urgesTotal: d.urgesTotal || 0,
-              resisted: d.resisted || 0,
-              tasksDone: d.tasksDone || 0,
-              lastRelapseDate,
-            }));
-            setScreen(d.onboardingComplete ? "dashboard" : "onboarding");
+            return;
           }
-        } catch {
+          const d = snap.data();
+          let streak = d.streak || 0;
+          if (d.lastRelapseDate) {
+            const days = Math.floor((Date.now()-d.lastRelapseDate.toDate().getTime())/86400000);
+            streak = Math.max(days,0);
+          }
+          setS({
+            uid: user.uid, userName: d.name||user.displayName||"Champion",
+            email: user.email||"", addictions: d.addictions||[],
+            streak, best: d.bestStreak||0,
+            urgesTotal: d.urgesTotal||0, resisted: d.resisted||0,
+            tasksDone: d.tasksDone||0,
+            lastRelapseDate: d.lastRelapseDate?.toDate()||null,
+          });
+          if (d.theme) setDark(d.theme==="dark");
+          // Load urge logs
+          await loadUrgelogs(user.uid);
+          setScreen(d.onboardingComplete ? "dashboard" : "onboarding");
+        } catch(e) {
+          console.error(e);
           setScreen("onboarding");
         }
       } else {
-        setUser(null);
         setScreen("auth");
       }
     });
+    return () => unsub();
   }, []);
 
-  function navigate(to) {
-    if (to === "relapse-modal") { setShowRelapse(true); return; }
-    if (to === "reset-modal")   { setShowReset(true); return; }
-    setScreen(to);
-    window.scrollTo(0, 0);
+  async function loadUrgelogs(uid) {
+    try {
+      const since = new Date(); since.setDate(since.getDate()-14); since.setHours(0,0,0,0);
+      const q = query(
+        collection(db,"users",uid,"urgelogs"),
+        where("timestamp",">=",Timestamp.fromDate(since)),
+        orderBy("timestamp","desc")
+      );
+      const snap = await getDocs(q);
+      setUrgelogs(snap.docs.map(d => ({
+        id: d.id,
+        date: d.data().timestamp.toDate(),
+        outcome: d.data().outcome,
+        trigger: d.data().trigger,
+        urgeType: d.data().urgeType,
+        taskUsed: d.data().taskUsed,
+      })));
+    } catch(e) { console.log("urgelogs fetch:", e); }
   }
 
-  const [showRelapse, setShowRelapse] = useState(false);
-  const [showReset,   setShowReset]   = useState(false);
+  async function handleLogout() {
+    await signOut(auth);
+    setS({ uid:null,userName:"Champion",email:"",addictions:[],streak:0,best:0,urgesTotal:0,resisted:0,tasksDone:0,lastRelapseDate:null });
+    setScreen("auth");
+    showToast("You've been logged out.");
+  }
 
-  async function confirmRelapse() {
-    setShowRelapse(false);
-    const best2 = Math.max(state.streak, state.best);
+  async function handleUrgeSubmit(ctx) {
+    setUrgeCtx(ctx);
+    let logId = null;
+    if (S.uid) {
+      try {
+        const ref = await addDoc(collection(db,"users",S.uid,"urgelogs"), {
+          timestamp: serverTimestamp(), urgeType: ctx.urgeType,
+          intensity: ctx.intensity, trigger: ctx.trigger,
+          triggerText: ctx.trigger==="other"?ctx.otherText:"",
+          outcome: "pending", taskUsed: null,
+        });
+        logId = ref.id;
+        setCurrentLogId(logId);
+        await saveUser(S.uid, { urgesTotal: increment(1) });
+        setS(s=>({...s, urgesTotal:s.urgesTotal+1}));
+      } catch(e) { console.error(e); }
+    }
+    go("task");
+  }
+
+  async function handleStartTask(task) {
+    setCurrentTask(task);
+    if (S.uid && currentLogId) {
+      await updateDoc(doc(db,"users",S.uid,"urgelogs",currentLogId), { taskUsed: task.id }).catch(()=>{});
+    }
+    go("timer");
+  }
+
+  async function handleUrgeGone(note) {
+    const newResisted = S.resisted + 1;
+    setS(s=>({...s, resisted: newResisted}));
+    if (S.uid) {
+      await saveUser(S.uid, { resisted: increment(1) }).catch(()=>{});
+      if (currentLogId) {
+        await updateDoc(doc(db,"users",S.uid,"urgelogs",currentLogId), {
+          outcome:"resisted", feedbackNote: note||""
+        }).catch(()=>{});
+      }
+    }
+    setCurrentLogId(null);
+    await loadUrgelogs(S.uid);
+    showToast("Wonderful — urge resisted! 🎉");
+    go("dashboard");
+  }
+
+  async function handleUrgeStill() {
+    if (S.uid && currentLogId) {
+      await updateDoc(doc(db,"users",S.uid,"urgelogs",currentLogId), { outcome:"still_there" }).catch(()=>{});
+    }
+    showToast("That's okay — let's try a different approach");
+    go("task");
+  }
+
+  async function handleRelapse() {
+    const newBest = Math.max(S.streak, S.best);
     const now = new Date();
-    setState(s => ({ ...s, streak: 0, best: best2, lastRelapseDate: now }));
-    if (state.uid) {
-      await updateDoc(doc(db, "users", state.uid), {
-        streak: 0, bestStreak: best2, lastRelapseDate: Timestamp.fromDate(now),
-      }).catch(() => {});
-      addDoc(collection(db, "users", state.uid, "urgelogs"), {
-        timestamp: serverTimestamp(), urgeType: "relapse", outcome: "relapsed", intensity: 10,
-      }).catch(() => {});
+    setS(s=>({...s, streak:0, best:newBest, lastRelapseDate:now}));
+    if (S.uid) {
+      await saveUser(S.uid, {
+        streak:0, bestStreak:newBest,
+        lastRelapseDate: Timestamp.fromDate(now),
+      }).catch(()=>{});
+      await addDoc(collection(db,"users",S.uid,"urgelogs"), {
+        timestamp: serverTimestamp(), urgeType:"relapse",
+        outcome:"relapsed", intensity:10,
+      }).catch(()=>{});
+      await loadUrgelogs(S.uid);
     }
     showToast("Logged. You can try again tomorrow 💙");
-    setScreen("dashboard");
+    go("dashboard");
+  }
+
+  function handleOnboardingDone({ addictions, streak, best, lastRelapseDate }) {
+    setS(s=>({...s, addictions, streak, best, lastRelapseDate}));
+    go("dashboard");
   }
 
   const isApp = !["auth","onboarding","loading"].includes(screen);
 
+  if (screen === "loading") return <LoadingOverlay msg={loadMsg}/>;
+
   return (
-    <>
-      <style>{CSS}</style>
+    <div className={`font-['Commissioner',sans-serif] bg-[#F5F7FA] min-h-screen`} style={{fontFamily:"Commissioner,sans-serif"}}>
+      <Toast msg={toast}/>
 
-      {screen === "loading" && <LoadingOverlay msg={loadMsg} />}
-
-      {screen !== "loading" && (
-        <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--t1)" }}>
-          <Navbar screen={screen} streak={state.streak} onNav={navigate}
-            onTheme={() => setTheme(t => t === "dark" ? "light" : "dark")} theme={theme} />
-
-          {screen === "auth"        && <AuthScreen onDone={() => {}} />}
-          {screen === "onboarding"  && <OnboardingScreen user={user} toast={showToast}
-            onDone={({ addictions, streak, best, lastRelapseDate }) => {
-              setState(s => ({ ...s, addictions, streak, best, lastRelapseDate }));
-              showToast("Welcome to Clarity! 🌿");
-              setScreen("dashboard");
-            }} />}
-          {screen === "dashboard"   && <DashboardScreen state={state} onNav={navigate} toast={showToast} uid={state.uid} />}
-          {screen === "urge"        && <UrgeScreen state={state} setState={setState} onNav={navigate} toast={showToast} uid={state.uid} />}
-          {screen === "task"        && <TaskScreen state={state} setState={setState} onNav={navigate} toast={showToast} />}
-          {screen === "timer"       && <TimerScreen state={state} setState={setState} onNav={navigate} toast={showToast} uid={state.uid} />}
-          {screen === "feedback"    && <FeedbackScreen state={state} setState={setState} onNav={navigate} toast={showToast} uid={state.uid} />}
-          {screen === "analytics"   && <AnalyticsScreen state={state} onNav={navigate} toast={showToast} uid={state.uid} />}
-          {screen === "profile"     && <ProfileScreen state={state} setState={setState} onNav={navigate} toast={showToast} user={user} theme={theme} setTheme={t => { setTheme(t); if (state.uid) updateDoc(doc(db,"users",state.uid),{theme:t}).catch(()=>{}); }} />}
-        </div>
+      {screen !== "auth" && screen !== "onboarding" && (
+        <Navbar screen={screen} streak={S.streak} dark={dark}
+          onToggleDark={toggleDark} onNav={go}/>
       )}
 
-      {/* Relapse Modal */}
-      <Modal open={showRelapse} onClose={() => setShowRelapse(false)}
-        title="Log a relapse"
-        body="It takes courage to acknowledge this. Your streak resets to zero, but your personal best stays. The AI uses this to build a better plan — you're not starting over, you're learning."
-        actions={<>
-          <Btn variant="soft" size="md" full onClick={() => setShowRelapse(false)}>Not yet</Btn>
-          <Btn variant="danger" size="md" full onClick={confirmRelapse}>Yes, log it</Btn>
-        </>}
-      />
-
-      {/* Reset Modal */}
-      <Modal open={showReset} onClose={() => setShowReset(false)}
-        title="Reset all data?"
-        body="This will permanently remove all your streaks, urge logs, and settings. You can try again tomorrow — but this action cannot be undone."
-        actions={<>
-          <Btn variant="soft" size="md" full onClick={() => setShowReset(false)}>Keep my data</Btn>
-          <Btn variant="danger" size="md" full onClick={() => { setShowReset(false); showToast("Full reset coming with Firebase"); }}>Reset everything</Btn>
-        </>}
-      />
-
-      <Toast msg={toast.msg} visible={toast.visible} />
-    </>
+      <div className={screen==="auth"||screen==="onboarding" ? "" : "min-h-[calc(100vh-64px)]"}>
+        {screen==="auth"       && <AuthScreen onNav={go} onToast={showToast}/>}
+        {screen==="onboarding" && <OnboardingScreen S={S} onDone={handleOnboardingDone} onToast={showToast}/>}
+        {screen==="dashboard"  && <Dashboard S={S} urgelogs={urgelogs} onNav={go} onToast={showToast}/>}
+        {screen==="urge"       && <UrgeScreen S={S} onNav={go} onSubmit={handleUrgeSubmit} customTypes={customTypes}
+          onAddType={t=>setCustomTypes(c=>[...c,t])} onToast={showToast}/>}
+        {screen==="task"       && <TaskScreen S={S} urgeCtx={urgeCtx} onNav={go} onStart={handleStartTask} onToast={showToast}/>}
+        {screen==="timer"      && <TimerScreen task={currentTask} urgeCtx={urgeCtx}
+          onQuit={()=>go("task")} onDone={()=>go("feedback")} onToast={showToast}/>}
+        {screen==="feedback"   && <FeedbackScreen task={currentTask} onGone={handleUrgeGone} onStill={handleUrgeStill}/>}
+        {screen==="analytics"  && <AnalyticsScreen S={S} urgelogs={urgelogs} onToast={showToast} onRelapse={handleRelapse}/>}
+        {screen==="profile"    && <ProfileScreen S={S} dark={dark} onToggleDark={toggleDark} onLogout={handleLogout} onToast={showToast}/>}
+      </div>
+    </div>
   );
 }
